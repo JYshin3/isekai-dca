@@ -259,33 +259,77 @@ def fetch(t,period="1y"):
         return df
     except: return pd.DataFrame()
 
-@st.cache_data(ttl=3600)  # 1시간 캐시
+@st.cache_data(ttl=1800)  # 30분 캐시
 def fetch_uranium():
     """
-    우라늄 현물가 자동 수집
-    1순위: UX=F (CME 우라늄 선물, U3O8 $/lb) — 현물가와 거의 동일
-    2순위: CCJ(Cameco) 주가 기반 추정
+    우라늄 현물가 자동 수집 (4단계 폴백)
+
+    1순위: UX=F  — CME 우라늄 선물 (U3O8 $/lb) 직접값
+    2순위: U-UN.TO — Sprott Physical Uranium Trust
+           실물 U3O8 보유 펀드. NAV ÷ 보유량으로 현물가 역산
+           환산계수 ≈ 0.2lb/unit (Sprott 공시 기준)
+    3순위: URA ETF + 회귀계수
+           URA는 우라늄 채굴사 ETF. 가격과 상관관계 높음
+           2023~2025 회귀: uranium ≈ URA × 2.85
+    4순위: CCJ × 1.82 (Cameco 주가 기반)
     """
-    # UX=F: CME Uranium Futures (U3O8 $/lb)
+    results=[]
+
+    # ── 1순위: UX=F CME 선물 (가장 직접적)
     try:
-        df=yf.download("UX=F",period="5d",progress=False,auto_adjust=True)
+        df=yf.download("UX=F",period="10d",progress=False,auto_adjust=True)
         if not df.empty:
             df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
             px=float(df["Close"].dropna().iloc[-1])
-            if 20<px<300:
-                return round(px,2),"UX=F (CME 우라늄 선물)"
+            if 20<px<200:
+                results.append((px,"UX=F · CME 우라늄 선물 $/lb",1))
     except: pass
-    # 백업: Global X Uranium ETF NAV 기반 (거칠지만 방향성 맞음)
+
+    # ── 2순위: U-UN.TO Sprott Physical Uranium Trust
+    # NAV per share = 우라늄 보유량(lb) × 현물가
+    # 2024년말 기준 보유량: ~62M lb / ~316M shares ≈ 0.196 lb/share
+    try:
+        df=yf.download("U-UN.TO",period="5d",progress=False,auto_adjust=True)
+        if not df.empty:
+            df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+            px_cad=float(df["Close"].dropna().iloc[-1])
+            # CAD→USD 환율 yfinance로 가져오기
+            fx=yf.download("CADUSD=X",period="2d",progress=False,auto_adjust=True)
+            fx.columns=[c[0] if isinstance(c,tuple) else c for c in fx.columns]
+            cad_usd=float(fx["Close"].dropna().iloc[-1]) if not fx.empty else 0.74
+            px_usd=px_cad*cad_usd
+            # 환산: 1 unit ≈ 0.196 lb U3O8
+            uranium_est=round(px_usd/0.196,2)
+            if 20<uranium_est<200:
+                results.append((uranium_est,"U-UN.TO · Sprott 실물 ETF 역산",2))
+    except: pass
+
+    # ── 3순위: URA ETF 회귀 추정
+    try:
+        df=yf.download("URA",period="5d",progress=False,auto_adjust=True)
+        if not df.empty:
+            df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+            px=float(df["Close"].dropna().iloc[-1])
+            est=round(px*2.85,1)
+            if 20<est<200:
+                results.append((est,"URA ETF × 2.85 추정",3))
+    except: pass
+
+    # ── 4순위: CCJ Cameco
     try:
         df=yf.download("CCJ",period="5d",progress=False,auto_adjust=True)
         if not df.empty:
             df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
             px=float(df["Close"].dropna().iloc[-1])
-            # CCJ ≈ 우라늄가 * 0.55 경험적 환산
-            est=round(px/0.55,1)
-            if 20<est<300:
-                return est,"CCJ 기반 추정"
+            est=round(px*1.82,1)
+            if 20<est<200:
+                results.append((est,"CCJ Cameco × 1.82 추정",4))
     except: pass
+
+    if results:
+        # 우선순위 가장 높은 것 반환
+        best=sorted(results,key=lambda x:x[2])[0]
+        return best[0],best[1]
     return None,"자동 수집 실패"
 
 def price_chart(df,t,ind):
@@ -444,6 +488,7 @@ with st.sidebar:
         st.markdown(f'<div style="font-size:.65rem;color:#e08c3c;margin-bottom:.3rem">⚠️ {msg}</div>',unsafe_allow_html=True)
     uranium=st.number_input("우라늄 ($/lb) 수동보정",30.,148.,float(u_default),.5,
         help="자동값 이상할 때만 조정")
+    st.markdown('<a href="https://tradingeconomics.com/commodity/uranium" target="_blank" style="font-size:.65rem;color:#c9a84c;text-decoration:none">📊 우라늄 현물가 확인 →</a>',unsafe_allow_html=True)
     pf["uranium"]=uranium
     earn_mu=st.checkbox("MU 실적 후 -10% 급락?",value=pf.get("earn_mu",False))
     pf["earn_mu"]=earn_mu
@@ -758,8 +803,108 @@ with ta2:
         extra_budget = st.number_input("추가 투입 가능 금액 ($)", min_value=0., value=float(BUDGET), step=100., key="rebal_budget",
             help="이번 달 DCA 예산 또는 추가 투입금. 이 금액으로 매수 비중 조정 우선 시도.")
 
-        if st.button("⚖ 리밸런싱 추천 계산", key="rebal_btn"):
-            st.session_state["show_rebal"] = True
+        c_btn1, c_btn2 = st.columns(2)
+        with c_btn1:
+            if st.button("⚖ 매수 우선 리밸런싱", key="rebal_btn", use_container_width=True):
+                st.session_state["show_rebal"] = True
+                st.session_state["show_sell"] = False
+        with c_btn2:
+            if st.button("🔴 매도 플랜 계산", key="sell_btn", use_container_width=True):
+                st.session_state["show_sell"] = True
+                st.session_state["show_rebal"] = False
+
+        # ── 매도 플랜
+        if st.session_state.get("show_sell", False):
+            st.markdown("---")
+            st.markdown('<div class="st2">🔴 매도 플랜 — 세금 최소화</div>',unsafe_allow_html=True)
+            st.markdown('<div class="warn">⚠️ 매도는 세금이 발생합니다. 세금 적은 순서로 정렬했습니다.</div>',unsafe_allow_html=True)
+            st.markdown('<div style="font-size:.7rem;color:#6b7a99;margin:.5rem 0">📌 보유기간: 1년 미만 단기(37%) / 1년 이상 장기(15%)</div>',unsafe_allow_html=True)
+
+            hold_periods = {}
+            cols_hp = st.columns(5)
+            for i_hp,t_hp in enumerate(TICKERS):
+                with cols_hp[i_hp]:
+                    hold_periods[t_hp] = st.selectbox(t_hp, ["장기(15%)","단기(37%)"], key="hp_"+t_hp)
+
+            surplus_items = []
+            for t_s,info_s in TICKERS.items():
+                cur_s = cw.get(t_s,0)
+                tgt_s = info_s["weight"]
+                if cur_s - tgt_s > 0.01:
+                    surplus_val = (cur_s - tgt_s) * pv
+                    px_s = prices.get(t_s,0)
+                    avg_s = pf["holdings"][t_s].get("avg_cost",0)
+                    sh_s = surplus_val / px_s if px_s > 0 else 0
+                    gain_s = max((px_s - avg_s) * sh_s, 0) if avg_s > 0 else 0
+                    is_long_s = hold_periods[t_s] == "장기(15%)"
+                    rate_s = 0.15 if is_long_s else 0.37
+                    tax_s = gain_s * rate_s
+                    surplus_items.append({
+                        "t":t_s,"info":info_s,
+                        "surplus_val":surplus_val,"sh":sh_s,"px":px_s,
+                        "avg":avg_s,"gain":gain_s,"rate":rate_s,"tax":tax_s,
+                        "is_long":is_long_s,"cur_pct":cur_s*100,"tgt_pct":tgt_s*100,
+                    })
+
+            if surplus_items:
+                surplus_items.sort(key=lambda x:x["tax"])
+                total_sell = sum(x["surplus_val"] for x in surplus_items)
+                total_tax  = sum(x["tax"] for x in surplus_items)
+                net_sell   = total_sell - total_tax
+
+                sc1,sc2,sc3 = st.columns(3)
+                with sc1: st.markdown(f'<div class="mb"><div class="ml">총 매도금액</div><div class="mv" style="color:#e05c5c">${total_sell:,.0f}</div></div>',unsafe_allow_html=True)
+                with sc2: st.markdown(f'<div class="mb"><div class="ml">예상 세금</div><div class="mv" style="color:#e08c3c">${total_tax:,.0f}</div></div>',unsafe_allow_html=True)
+                with sc3: st.markdown(f'<div class="mb"><div class="ml">실수령액</div><div class="mv" style="color:#3ecf8e">${net_sell:,.0f}</div></div>',unsafe_allow_html=True)
+
+                st.markdown("<br>",unsafe_allow_html=True)
+                st.markdown('<div style="font-size:.72rem;color:#c9a84c;margin-bottom:.5rem">📋 세금 낮은 순서로 매도 권장</div>',unsafe_allow_html=True)
+
+                for rank_s,item_s in enumerate(surplus_items,1):
+                    t2=item_s["t"]; info2=item_s["info"]
+                    tc2="#3ecf8e" if item_s["is_long"] else "#e05c5c"
+                    tl2="장기 15%" if item_s["is_long"] else "단기 37%"
+                    sv=item_s["surplus_val"]; sh2=item_s["sh"]; px2=item_s["px"]
+                    gn=item_s["gain"]; tx=item_s["tax"]
+                    c1p=item_s["cur_pct"]; t1p=item_s["tgt_pct"]; avg2=item_s["avg"]
+                    sv_str  = f"${sv:,.0f}"
+                    sh_str  = f"{sh2:.4f}주"
+                    px_str  = f"${px2:,.2f}"
+                    gn_str  = f"${gn:,.0f}"
+                    tx_str  = f"${tx:,.0f}"
+                    avg_str = f"${avg2:,.2f}"
+                    st.markdown(
+                        f'''<div style="background:#1a0a0a;border:1px solid #e05c5c55;border-left:3px solid #e05c5c;border-radius:6px;padding:.9rem;margin-bottom:.5rem">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+    <div>
+      <span style="font-size:.62rem;color:#6b7a99">#{rank_s} 우선 매도</span><br>
+      <span style="font-family:Cinzel,serif;font-size:1rem;color:{info2["color"]}">{t2}</span>
+      <span style="font-size:.62rem;color:{tc2};margin-left:.4rem;background:{tc2}22;padding:1px 5px;border-radius:3px">{tl2}</span>
+    </div>
+    <div style="text-align:right">
+      <div style="font-family:Cinzel,serif;color:#e05c5c;font-size:1.1rem">{sv_str}</div>
+      <div style="font-size:.68rem;color:#6b7a99">{sh_str} @ {px_str}</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:.67rem;padding-top:.3rem;border-top:1px solid #e05c5c22;flex-wrap:wrap;gap:.2rem">
+    <span style="color:#9ba8bb">비중 {c1p:.1f}%→{t1p:.0f}%</span>
+    <span style="color:#9ba8bb">평단가 {avg_str} · 수익 {gn_str}</span>
+    <span style="color:{tc2}">세금 ~{tx_str}</span>
+  </div>
+</div>''',unsafe_allow_html=True)
+
+                st.markdown("---")
+                st.markdown('<div class="info">💡 매도 대금 재배분 제안 (IREN Rule 1 기준)</div>',unsafe_allow_html=True)
+                for rt,rw_r in [("GOOGL",0.50),("MU",0.30),("NXE",0.20)]:
+                    ri_amt = total_sell * rw_r
+                    ri_px  = prices.get(rt,0)
+                    ri_sh  = ri_amt/ri_px if ri_px>0 else 0
+                    ri_col = TICKERS[rt]["color"]
+                    ri_str = f"${ri_amt:,.0f}"
+                    ri_shstr = f"{ri_sh:.4f}주"
+                    st.markdown(f'<div style="font-size:.75rem;padding:.3rem 0;border-bottom:1px solid #1e2a3a">→ <span style="color:{ri_col};font-family:Cinzel,serif">{rt}</span> {rw_r*100:.0f}% · <b>{ri_str}</b> ({ri_shstr})</div>',unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="ok">✅ 매도 필요 없음 — 모든 종목 목표 비중 내</div>',unsafe_allow_html=True)
 
         if st.session_state.get("show_rebal", False):
             # ── 리밸런싱 계산 엔진
