@@ -295,7 +295,7 @@ def price_chart(df,t,ind):
 
     # ── 전체 배열 (지표 계산은 1y 기준)
     full_idx=ind.get("_idx",df2.index)
-    ra=ind.get("_rsi_arr",np.array([])); rs=ind.get("_rsi_start",14)
+    ra=ind.get("_rsi_arr",np.array([])); rs=ind.get("_rsi_start",p["rsi"])  # 종목별 RSI period
     mh=ind.get("_mh",np.array([])); s80=ind.get("_s80",np.array([]))
     s200=ind.get("_s200",np.array([])); bu=ind.get("_bu",np.array([])); bl=ind.get("_bl",np.array([]))
 
@@ -553,21 +553,41 @@ with ta2:
     sel=st.selectbox("종목 선택",list(TICKERS.keys()),format_func=lambda x:f"{x} — {TICKERS[x]['name']}")
     df=mdata.get(sel,pd.DataFrame()); ind=inds.get(sel,{}); p=IND_P[sel]
     if not df.empty and ind:
-        ms2=[("RSI",f"{ind.get('rsi',0):.1f}",f"기간 {p['rsi']}"),
-             ("StochRSI K",f"{ind.get('stoch_k',0):.1f}",f"K={p['sk']}/D={p['sd']}"),
-             ("MACD Hist",f"{ind.get('macd_hist',0):+.3f}",str(p["macd"])),
-             ("Z-Score",f"{ind.get('z_score',0):+.2f}","30일"),
-             ("ATR",f"{ind.get('atr',0):.2f}",f"기간 {p['atr']}"),
-             ("ADX",f"{ind.get('adx',0):.1f}",f"기간 {p['adx']}"),
-             ("SMA80",f"${ind.get('sma80',0):,.2f}","중기"),
-             ("SMA200",f"${ind.get('sma200',0):,.2f}","장기"),
-             ("거래량배율",f"{ind.get('vol_spike',0):.1f}×","vs 20일"),
-             ("1주 수익률",f"{ind.get('chg_1w',0):+.1f}%","5일")]
+        ms2=[
+            ("RSI",       f"{ind.get('rsi',0):.1f}",      f"기간 {p['rsi']}"),
+            ("StochRSI K",f"{ind.get('stoch_k',0):.1f}",  f"K={p['sk']}/D={p['sd']}"),
+            ("MACD Hist", f"{ind.get('macd_hist',0):+.3f}",f"({p['macd'][0]},{p['macd'][1]},{p['macd'][2]})"),
+            ("Z-Score",   f"{ind.get('z_score',0):+.2f}",  "기간 30"),
+            ("ATR",       f"{ind.get('atr',0):.2f}",       f"기간 {p['atr']}"),
+            ("ADX",       f"{ind.get('adx',0):.1f}",       f"기간 {p['adx']}"),
+            ("BB σ",      f"{p['bbs']}σ",                  "볼린저밴드 폭"),
+            ("SMA80",     f"${ind.get('sma80',0):,.2f}",   "중기 추세선"),
+            ("SMA200",    f"${ind.get('sma200',0):,.2f}",  "장기 추세선"),
+            ("1주 수익률",f"{ind.get('chg_1w',0):+.1f}%",  "5거래일"),
+        ]
         cs2=st.columns(5)
         for i,(lb,vl,sb) in enumerate(ms2):
             with cs2[i%5]: st.markdown(f'<div class="mb" style="margin-bottom:.5rem"><div class="ml">{lb}</div><div style="font-size:1rem;color:{TICKERS[sel]["color"]};font-family:Cinzel,serif">{vl}</div><div class="ms">{sb}</div></div>',unsafe_allow_html=True)
         st.plotly_chart(price_chart(df,sel,ind),use_container_width=True)
     else: st.info("데이터 로딩 중...")
+    # 파라미터 요약 테이블
+    st.markdown("---")
+    st.markdown('<div class="st2">📋 전체 종목 지표 파라미터 (미세튜닝 최종값)</div>',unsafe_allow_html=True)
+    param_rows=[]
+    for tk,pp in IND_P.items():
+        param_rows.append({
+            "종목":tk,
+            "RSI기간":pp["rsi"],
+            "StochRSI K/D":f"{pp['sk']}/{pp['sd']}",
+            "MACD":f"({pp['macd'][0]},{pp['macd'][1]},{pp['macd'][2]})",
+            "BB σ":pp["bbs"],
+            "ATR":pp["atr"],
+            "ADX":pp["adx"],
+            "MA":"SMA80 / SMA200",
+            "Z-Score기간":30,
+            "거래량배율":"2.0× (IREN) / 1.5×",
+        })
+    st.dataframe(pd.DataFrame(param_rows),use_container_width=True,hide_index=True)
 
 # ── TAB 3 ──
 with ta3:
