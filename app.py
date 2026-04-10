@@ -312,6 +312,15 @@ def pie_chart(wts,vals):
 pf=load_pf()
 st.markdown('<div class="hd"><h1>⚔ 이세계 DCA ⚔</h1><p>ADAPTIVE DCA SYSTEM · TARGET $500,000 · 36 MONTHS</p></div>',unsafe_allow_html=True)
 
+# 데이터를 sidebar보다 먼저 fetch (sidebar에서 prices 사용하므로)
+with st.spinner("시장 데이터 로딩 중..."):
+    mdata,inds,prices={},{},{}
+    for t in TICKERS:
+        df=fetch(t); mdata[t]=df
+        if not df.empty:
+            ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
+        else: inds[t]={}; prices[t]=0
+
 with st.sidebar:
     st.markdown('<div class="st2">⚙ 설정</div>',unsafe_allow_html=True)
     uranium=st.number_input("우라늄 현물가 ($/lb)",30.,150.,float(pf.get("uranium",68.)),.5)
@@ -345,14 +354,6 @@ with st.sidebar:
     if st.button("💾 저장"): save_pf(pf); st.success("저장됨!")
     if st.button("🔄 새로고침"): st.cache_data.clear(); st.rerun()
     st.markdown(f'<div style="color:#6b7a99;font-size:.65rem;margin-top:1rem">{datetime.now().strftime("%Y-%m-%d %H:%M")} UTC</div>',unsafe_allow_html=True)
-
-with st.spinner("시장 데이터 로딩 중..."):
-    mdata,inds,prices={},{},{}
-    for t in TICKERS:
-        df=fetch(t); mdata[t]=df
-        if not df.empty:
-            ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
-        else: inds[t]={}; prices[t]=0
 
 sigs={
     "GOOGL":sg_googl(inds.get("GOOGL",{})),
