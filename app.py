@@ -355,14 +355,17 @@ with st.spinner("시장 데이터 로딩 중..."):
 
 with st.sidebar:
     st.markdown('<div class="st2">⚙ 설정</div>',unsafe_allow_html=True)
-    # 자동 수집값 우선, 실패 시 저장값 사용
-    u_default=u_auto if u_auto else float(pf.get("uranium",68.))
-    if u_auto:
-        st.markdown(f'<div style="font-size:.65rem;color:#3ecf8e;margin-bottom:.3rem">🤖 자동 수집: ${u_auto} ({u_src})</div>',unsafe_allow_html=True)
+    # 우라늄 자동수집 — 범위 강제 클램프 후 사용
+    saved_u=float(pf.get("uranium",68.))
+    if u_auto and 30<=u_auto<=148:
+        u_default=u_auto
+        st.markdown(f'<div style="font-size:.65rem;color:#3ecf8e;margin-bottom:.3rem">🤖 자동: ${u_auto:.1f}/lb ({u_src})</div>',unsafe_allow_html=True)
     else:
-        st.markdown(f'<div style="font-size:.65rem;color:#e08c3c;margin-bottom:.3rem">⚠️ 자동 수집 실패 — 저장값 사용 (${pf.get("uranium",68.)})</div>',unsafe_allow_html=True)
-    uranium=st.number_input("우라늄 현물가 ($/lb) — 수동 보정",30.,150.,u_default,.5,
-        help="자동 수집값이 틀렸을 때만 조정하세요")
+        u_default=min(max(saved_u,30.),148.)  # 항상 30~148 범위
+        msg=f"자동수집 실패 — 저장값 ${saved_u:.1f}" if not u_auto else f"범위초과(${u_auto}) — 저장값 사용"
+        st.markdown(f'<div style="font-size:.65rem;color:#e08c3c;margin-bottom:.3rem">⚠️ {msg}</div>',unsafe_allow_html=True)
+    uranium=st.number_input("우라늄 ($/lb) 수동보정",30.,148.,float(u_default),.5,
+        help="자동값 이상할 때만 조정")
     pf["uranium"]=uranium
     earn_mu=st.checkbox("MU 실적 후 -10% 급락?",value=pf.get("earn_mu",False))
     pf["earn_mu"]=earn_mu
