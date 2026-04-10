@@ -182,13 +182,22 @@ def sg_iren(i):
     mhp=i.get("macd_hist_prev",mh); sk=i.get("stoch_k",50); sd=i.get("stoch_d",50)
     hl=i.get("higher_low",False); pc=i.get("price_chg",0)
     ax=(at>ata*2) if ata>0 else False
-    if rv>60 or ax: mx,txt=0,"❌ 매수 중단 (RSI 과열)" if rv>60 else "❌ 변동성 과다"
-    elif rv<25 and pc<=-10: mx,txt=3,"🔥 3배 매수 (RSI<25+폭락)"
-    elif rv<35: mx,txt=2,"⚡ 2배 매수 (RSI<35)"
-    else: mx,txt=1,"✅ 기본 매수"
+    # RSI 기반 기본 배율
+    if rv>60 or ax:
+        mx,txt=0,"❌ 매수 중단 (RSI 과열)" if rv>60 else "❌ 변동성 과다"
+    elif rv<25 and pc<=-10:
+        mx,txt=3,"🔥 3배 매수 (RSI<25+폭락)"
+    elif rv<35:
+        mx,txt=2,"⚡ 2배 매수 (RSI<35)"
+    else:
+        mx,txt=1,"✅ 기본 매수"
+    # 불타기: 2개↑ 충족 시 배율 1단계 업 (예:에A개서 B배, 최대 3배)
     ign={"MA20 위 회복":px>e20,"MACD 히스토 상승":mh>mhp,"Higher Low":hl,"StochRSI 20→40":sk>40 and sk>sd and sk>20}
-    ic=sum(ign.values()); bonus=300 if(ic>=2 and mx>0) else 0
-    return {"mul":mx,"txt":txt,"amt":min(800*mx+bonus,BUDGET-600),"ign":ign,"ic":ic,"bonus":bonus}
+    ic=sum(ign.values())
+    if ic>=2 and mx>0:
+        mx=min(mx+1,3)
+        txt=txt+" 🔥불타기("+str(ic)+"/4)\u2192"+str(mx)+"배"
+    return {"mul":mx,"txt":txt,"amt":min(800*mx,BUDGET-600),"ign":ign,"ic":ic}
 
 def sg_nxe(i,u):
     if u>82: mx,txt=0,f"❌ 매수 중단 (${u:.0f})"
@@ -252,12 +261,19 @@ def fetch(t,period="1y"):
 
 def price_chart(df,t,ind):
     p=IND_P[t]; col=TICKERS[t]["color"]
-    idx=ind.get("_idx",df.index); c=ind.get("_c",df["Close"].values)
+    # flatten MultiIndex columns if needed
+    df2=df.copy()
+    df2.columns=[c[0] if isinstance(c,tuple) else c for c in df2.columns]
+    idx=ind.get("_idx",df2.index); c=ind.get("_c",df2["Close"].astype(float).values)
     ra=ind.get("_rsi_arr",np.array([])); rs=ind.get("_rsi_start",14)
     mh=ind.get("_mh",np.array([])); s80=ind.get("_s80",np.array([]))
     s200=ind.get("_s200",np.array([])); bu=ind.get("_bu",np.array([])); bl=ind.get("_bl",np.array([]))
+    o=df2["Open"].astype(float).values
+    h2=df2["High"].astype(float).values
+    l2=df2["Low"].astype(float).values
+    cl=df2["Close"].astype(float).values
     fig=make_subplots(rows=3,cols=1,row_heights=[.55,.25,.20],shared_xaxes=True,vertical_spacing=.02)
-    fig.add_trace(go.Candlestick(x=idx,open=df["Open"],high=df["High"],low=df["Low"],close=df["Close"],
+    fig.add_trace(go.Candlestick(x=idx,open=o,high=h2,low=l2,close=cl,
         increasing_line_color=col,decreasing_line_color="#e05c5c",
         increasing_fillcolor=col+"88",decreasing_fillcolor="#e05c5c88",name=t),row=1,col=1)
     if len(s80)==len(idx) and not np.all(np.isnan(s80)):
@@ -306,9 +322,24 @@ with st.sidebar:
     st.markdown('<div class="st2">📁 포트폴리오</div>',unsafe_allow_html=True)
     with st.expander("보유 주식 입력"):
         for t in TICKERS:
-            h=pf["holdings"][t]; c1,c2=st.columns(2)
-            with c1: h["shares"]=st.number_input(f"{t} 주수",0.,value=float(h["shares"]),step=.01,key=f"s{t}")
-            with c2: h["avg_cost"]=st.number_input("평균단가",0.,value=float(h["avg_cost"]),step=.01,key=f"a{t}")
+            h=pf["holdings"][t]
+            px_now=prices.get(t,0)
+            # invested_amount → shares 자동 계산
+            invested_amt=h["shares"]*h["avg_cost"] if h["avg_cost"]>0 else 0.
+            new_amt=st.number_input(
+                f"{t} 투자금액 ($)",0.,value=float(invested_amt),step=10.,key=f"amt{t}",
+                help=f"현재가 ${px_now:,.2f} 기준 자동으로 주수 계산")
+            avg=st.number_input(
+                f"{t} 평균단가 ($)",0.,value=float(h["avg_cost"]) if h["avg_cost"]>0 else float(px_now),
+                step=.01,key=f"a{t}")
+            h["avg_cost"]=avg
+            h["shares"]=new_amt/avg if avg>0 else 0.
+            # 현재가 기준 평가액 미리보기
+            cur_val=h["shares"]*px_now
+            pnl_pct=(px_now-avg)/avg*100 if avg>0 else 0.
+            col_c="#3ecf8e" if pnl_pct>=0 else "#e05c5c"
+            if new_amt>0 and px_now>0:
+                st.markdown(f'<div style="font-size:.65rem;color:{col_c};margin-bottom:.5rem">→ {h["shares"]:.4f}주 · 평가액 ${cur_val:,.0f} ({pnl_pct:+.1f}%)</div>',unsafe_allow_html=True)
         pf["total_invested"]=sum(h["shares"]*h["avg_cost"] for h in pf["holdings"].values())
         pf["start_date"]=st.text_input("시작일 (YYYY-MM-DD)",pf.get("start_date",datetime.now().strftime("%Y-%m-%d")))
     if st.button("💾 저장"): save_pf(pf); st.success("저장됨!")
