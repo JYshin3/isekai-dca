@@ -498,8 +498,8 @@ pvt={t:hl[t]["shares"]*prices.get(t,0) for t in TICKERS}
 cw={t:v/pv if pv>0 else 0 for t,v in pvt.items()}
 
 ta0,ta1,ta2,ta3,ta4,ta5=st.tabs(["🎯 오늘 살까?","📡 신호 현황","📊 종목 분석","📅 이번달 계획","⚖ 리밸런싱","🏆 목표 추적"])
+ta0,ta1,ta2,ta3=st.tabs(["🎯 오늘 살까?","📊 종목 분석","⚖ 리밸런싱","🏆 목표 추적"])
 
-# ── TAB 0: 오늘 살까? ──
 with ta0:
     st.markdown('<div class="st2">🎯 오늘의 매수 결정</div>',unsafe_allow_html=True)
 
@@ -672,55 +672,7 @@ with ta0:
 </div></div>''',unsafe_allow_html=True)
 
 
-# ── TAB 2: 신호 현황 ──
 with ta1:
-    st.markdown('<div class="st2">⚡ 실시간 매수 신호</div>',unsafe_allow_html=True)
-    ac=sum(1 for s in sigs.values() if s["mul"]>0)
-    sc=sum(1 for s in sigs.values() if s["mul"]>=2)
-    ic=sigs["IREN"].get("ic",0)
-    c1,c2,c3,c4=st.columns(4)
-    with c1: st.markdown(f'<div class="mb card-g"><div class="ml">이번달 총 매수</div><div class="mv">${sum(alloc.values()):,.0f}</div><div class="ms">예산 ${BUDGET:,}</div></div>',unsafe_allow_html=True)
-    with c2: st.markdown(f'<div class="mb"><div class="ml">활성 신호</div><div class="mv">{ac}/5</div><div class="ms">종목</div></div>',unsafe_allow_html=True)
-    with c3: st.markdown(f'<div class="mb"><div class="ml">강력 신호 (2x+)</div><div class="mv" style="color:#e05c5c">{sc}</div><div class="ms">종목</div></div>',unsafe_allow_html=True)
-    with c4:
-        ic2="#3ecf8e" if ic>=2 else "#c9a84c" if ic==1 else "#6b7a99"
-        st.markdown(f'<div class="mb"><div class="ml">IREN 불타기</div><div class="mv" style="color:{ic2}">{ic}/4</div><div class="ms">{"🔥 +$300 활성" if ic>=2 else "미충족"}</div></div>',unsafe_allow_html=True)
-    st.markdown("<br>",unsafe_allow_html=True)
-    for t,info in TICKERS.items():
-        ind=inds.get(t,{}); sg=sigs[t]; amt=alloc.get(t,0)
-        px=prices.get(t,0); pc=ind.get("price_chg",0); rv=ind.get("rsi",0); mx=sg["mul"]
-        bc="#e05c5c" if mx==0 else "#3ecf8e" if mx>=3 else "#c9a84c" if mx==2 else "#4fa3e0"
-        bx=(f'<span style="background:#3a1a1a;color:#e05c5c;border:1px solid #e05c5c55;padding:2px 8px;border-radius:3px;font-size:.65rem">STOP</span>' if mx==0
-            else f'<span style="background:#0f2a1a;color:#2fff9e;border:1px solid #2fff9e;padding:2px 8px;border-radius:3px;font-size:.65rem;font-weight:600">{mx}× 매수</span>' if mx>=2
-            else f'<span style="background:#1a3a2a;color:#3ecf8e;border:1px solid #3ecf8e55;padding:2px 8px;border-radius:3px;font-size:.65rem">기본 매수</span>')
-        cc="#3ecf8e" if pc>=0 else "#e05c5c"; cs="▲" if pc>=0 else "▼"
-        rc="#e05c5c" if rv>65 else "#e08c3c" if rv>50 else "#3ecf8e" if rv<35 else "#4fa3e0"
-        zs=ind.get("z_score",0); zc="#3ecf8e" if zs<-1.5 else "#e05c5c" if zs>1.5 else "#c9a84c"
-        ac2="#3ecf8e" if amt>0 else "#6b7a99"
-        cols=st.columns([2,2,1.2,1.2,1.2,2.2])
-        with cols[0]: st.markdown(f'<div style="padding:.7rem;background:#0f1620;border:1px solid {bc}44;border-left:3px solid {bc};border-radius:6px"><div style="font-family:Cinzel,serif;font-size:.95rem">{t}</div><div style="font-size:.62rem;color:#6b7a99">{info["name"]}</div>{bx}</div>',unsafe_allow_html=True)
-        with cols[1]: st.markdown(f'<div style="padding:.7rem;background:#0f1620;border:1px solid #1e2a3a;border-radius:6px"><div style="color:#6b7a99;font-size:.58rem">현재가</div><div style="font-size:1rem;color:{info["color"]}">${px:,.2f}</div><div style="font-size:.68rem;color:{cc}">{cs} {abs(pc):.2f}%</div></div>',unsafe_allow_html=True)
-        with cols[2]: st.markdown(f'<div style="padding:.7rem;background:#0f1620;border:1px solid #1e2a3a;border-radius:6px;text-align:center"><div style="color:#6b7a99;font-size:.58rem">RSI({IND_P[t]["rsi"]})</div><div style="font-size:1.2rem;color:{rc};font-family:Cinzel,serif">{rv:.0f}</div></div>',unsafe_allow_html=True)
-        with cols[3]: st.markdown(f'<div style="padding:.7rem;background:#0f1620;border:1px solid #1e2a3a;border-radius:6px;text-align:center"><div style="color:#6b7a99;font-size:.58rem">Z-Score</div><div style="font-size:1.2rem;color:{zc};font-family:Cinzel,serif">{zs:+.2f}</div></div>',unsafe_allow_html=True)
-        with cols[4]: st.markdown(f'<div style="padding:.7rem;background:#0f1620;border:1px solid #1e2a3a;border-radius:6px;text-align:center"><div style="color:#6b7a99;font-size:.58rem">매수액</div><div style="font-size:1rem;color:{ac2};font-family:Cinzel,serif">${amt:,.0f}</div></div>',unsafe_allow_html=True)
-        with cols[5]: st.markdown(f'<div style="padding:.7rem;background:#0f1620;border:1px solid #1e2a3a;border-radius:6px"><div style="color:#6b7a99;font-size:.58rem">신호</div><div style="font-size:.72rem;margin-top:.2rem">{sg["txt"]}</div></div>',unsafe_allow_html=True)
-        if t=="IREN" and sg.get("ic",0)>0:
-            ign=sg.get("ign",{}); txt2=" · ".join(f'{"✅" if v else "❌"} {k}' for k,v in ign.items())
-            st.markdown(f'<div class="info">🔥 불타기: {txt2}</div>',unsafe_allow_html=True)
-        st.markdown("<div style='height:3px'></div>",unsafe_allow_html=True)
-    st.markdown("---")
-    u=uranium; uc="#e05c5c" if u>82 else "#e08c3c" if u>75 else "#c9a84c" if u>70 else "#3ecf8e"
-    pct2=min((u-50)/80*100,100)
-    st.markdown(f"""<div class="card"><div class="st2">☢ 우라늄 모니터 (NXE)</div>
-<div style="display:flex;gap:2rem;align-items:center">
-<div><div style="color:#6b7a99;font-size:.7rem">U₃O₈ 현물가</div><div style="font-family:Cinzel,serif;font-size:2rem;color:{uc}">${u:.1f}/lb</div></div>
-<div style="flex:1"><div style="font-size:.7rem;margin-bottom:4px"><span style="color:#3ecf8e">■</span> &lt;$70 3× &nbsp;<span style="color:#c9a84c">■</span> $70-75 2× &nbsp;<span style="color:#e08c3c">■</span> $75-82 1× &nbsp;<span style="color:#e05c5c">■</span> &gt;$82 STOP</div>
-<div style="background:#1a2233;border-radius:4px;height:10px;position:relative"><div style="position:absolute;left:{pct2:.0f}%;top:-2px;width:4px;height:14px;background:{uc};border-radius:2px"></div></div>
-<div style="display:flex;justify-content:space-between;font-size:.6rem;color:#6b7a99;margin-top:2px"><span>$50</span><span>$70</span><span>$75</span><span>$82</span><span>$130</span></div>
-</div></div></div>""",unsafe_allow_html=True)
-
-# ── TAB 3: 종목 분석 ──
-with ta2:
     sel=st.selectbox("종목 선택",list(TICKERS.keys()),format_func=lambda x:f"{x} — {TICKERS[x]['name']}")
     df=mdata.get(sel,pd.DataFrame()); ind=inds.get(sel,{}); p=IND_P[sel]
     if not df.empty and ind:
@@ -760,34 +712,8 @@ with ta2:
         })
     st.dataframe(pd.DataFrame(param_rows),use_container_width=True,hide_index=True)
 
-# ── TAB 4: 이번달 계획 ──
-with ta3:
-    st.markdown('<div class="st2">💰 이번달 DCA 배분</div>',unsafe_allow_html=True)
-    extra=alloc.get("GOOGL",0)-600
-    if extra>0: st.markdown(f'<div class="info">ℹ️ 신호 미충족 → GOOGL 추가 흡수 +${extra:.0f} (총 ${alloc["GOOGL"]:,.0f})</div>',unsafe_allow_html=True)
-    for t,info in TICKERS.items():
-        amt=alloc.get(t,0); pct3=amt/BUDGET*100
-        c1,c2,c3=st.columns([1.5,4,1.5])
-        with c1: st.markdown(f'<div style="padding-top:.5rem;font-family:Cinzel,serif">{t}</div>',unsafe_allow_html=True)
-        with c2: op="0.9" if amt>0 else "0.2"; st.markdown(f'<div style="padding-top:.6rem"><div style="background:#1a2233;border-radius:3px;height:8px"><div style="width:{min(pct3,100):.0f}%;height:8px;background:{info["color"]};border-radius:3px;opacity:{op}"></div></div></div>',unsafe_allow_html=True)
-        with c3:
-            if amt>0: st.markdown(f'<div style="text-align:right;font-size:1rem;color:{info["color"]};font-family:Cinzel,serif;padding-top:.3rem">${amt:,.0f}</div>',unsafe_allow_html=True)
-            else: st.markdown(f'<div style="text-align:right;color:#6b7a99;font-size:.8rem;padding-top:.5rem">— 중단</div>',unsafe_allow_html=True)
-    st.markdown("---")
-    rw=[]
-    for t,info in TICKERS.items():
-        sg=sigs[t]; amt=alloc.get(t,0); px2=prices.get(t,0); sh=amt/px2 if px2>0 and amt>0 else 0
-        rw.append({"종목":t,"신호":sg["txt"],"배율":f"{sg['mul']}×","배정액":f"${amt:,.0f}","매수주수":f"{sh:.4f}" if sh>0 else "—","현재가":f"${px2:,.2f}"})
-    st.dataframe(pd.DataFrame(rw),use_container_width=True,hide_index=True)
-    st.markdown("""<div class="card" style="margin-top:1rem"><div class="st2">📌 월별 운용 규칙</div>
-<table><tr><th>단계</th><th>행동</th><th>비고</th></tr>
-<tr><td>1</td><td>GOOGL $600 선매수</td><td>매달 고정</td></tr>
-<tr><td>2~5</td><td>IREN→MU→NXE→IONQ 신호순</td><td>우선순위 예산 배분</td></tr>
-<tr><td>6</td><td>잔액 → GOOGL 추가</td><td>100% 집행 원칙</td></tr>
-</table></div>""",unsafe_allow_html=True)
-
-# ── TAB 5: 리밸런싱 ──
-with ta4:
+# ── TAB 2: 리밸런싱 ──
+with ta2:
     st.markdown('<div class="st2">⚖ 분기별 리밸런싱</div>',unsafe_allow_html=True)
     if pv>0:
         c1,c2=st.columns(2)
@@ -798,35 +724,138 @@ with ta4:
                 cur=cw.get(t,0)*100; tgt=info["weight"]*100; diff=cur-tgt
                 dc="#e05c5c" if abs(diff)>5 else "#c9a84c" if abs(diff)>2 else "#6b7a99"
                 st.markdown(f'<div style="margin-bottom:.5rem"><div style="display:flex;justify-content:space-between;font-size:.72rem;margin-bottom:2px"><span style="color:{info["color"]}">{t}</span><span style="color:{dc}">{cur:.1f}% / 목표 {tgt:.0f}% ({diff:+.1f}%)</span></div><div style="background:#1a2233;border-radius:3px;height:7px"><div style="width:{min(cur,100):.0f}%;height:7px;background:{info["color"]};border-radius:3px"></div></div></div>',unsafe_allow_html=True)
+
         st.markdown("---")
-        acts=[]
-        if cw.get("IREN",0)>.50: acts.append(("warn",f"⚠️ IREN {cw['IREN']*100:.1f}% > 50% — 초과분 GOOGL 50%/MU 30%/NXE 20% 분산"))
-        if cw.get("GOOGL",0)>.40: acts.append(("info",f"🔄 GOOGL {cw['GOOGL']*100:.1f}% > 40% — 초과분 IREN으로 로테이션"))
-        if cw.get("IONQ",0)>.10: acts.append(("warn",f"⚠️ IONQ {cw['IONQ']*100:.1f}% > 10% — 초과분 GOOGL로 이동"))
-        for t,info in TICKERS.items():
-            diff=(info["weight"]-cw.get(t,0))*100
-            if abs(diff)>=5: acts.append(("info" if diff>0 else "warn",f"{'📈' if diff>0 else '📉'} {t}: 목표 {info['weight']*100:.0f}% vs 현재 {cw.get(t,0)*100:.1f}% ({diff:+.1f}%)"))
-        if acts:
-            for kd,mg in acts: st.markdown(f'<div class="{kd}">{mg}</div>',unsafe_allow_html=True)
-        else: st.markdown('<div class="ok">✅ 리밸런싱 불필요 — 모든 비중 목표 범위 내</div>',unsafe_allow_html=True)
-        st.markdown("---")
+        # ── 현황 테이블
         rw2=[]
         for t,info in TICKERS.items():
             h=pf["holdings"][t]; px3=prices.get(t,0); val=h["shares"]*px3; avg=h["avg_cost"]
             pp=(px3-avg)/avg*100 if avg>0 else 0
             rw2.append({"종목":t,"주수":f"{h['shares']:.4f}","평균단가":f"${avg:,.2f}","현재가":f"${px3:,.2f}","평가액":f"${val:,.0f}","수익률":f"{pp:+.1f}%","현재비중":f"{cw.get(t,0)*100:.1f}%","목표":f"{info['weight']*100:.0f}%"})
         st.dataframe(pd.DataFrame(rw2),use_container_width=True,hide_index=True)
-    else: st.markdown('<div class="info">📌 사이드바에서 보유 주식을 입력하면 활성화됩니다.</div>',unsafe_allow_html=True)
-    st.markdown("""<div class="card" style="margin-top:1rem"><div class="st2">📋 리밸런싱 규칙</div>
-<table><tr><th>규칙</th><th>조건</th><th>액션</th></tr>
-<tr><td>Rule 1</td><td>IREN > 50%</td><td>→ GOOGL 50%/MU 30%/NXE 20%</td></tr>
-<tr><td>Rule 2</td><td>GOOGL > 40%</td><td>→ IREN 로테이션</td></tr>
-<tr><td>Rule 3</td><td>NXE 3개월 연속 음봉</td><td>→ 비중 +5% (바닥 신호)</td></tr>
-<tr><td>Rule 4</td><td>IONQ > 10%</td><td>→ GOOGL 이동</td></tr>
+
+        st.markdown("---")
+        st.markdown('<div class="st2">🧮 리밸런싱 추천 계산기</div>',unsafe_allow_html=True)
+        st.markdown('<div class="info">💡 원칙: <b>매수 우선</b>으로 비중 조정. 매도는 세금 최소화를 위해 꼭 필요한 경우만.</div>',unsafe_allow_html=True)
+
+        extra_budget = st.number_input("추가 투입 가능 금액 ($)", min_value=0., value=float(BUDGET), step=100., key="rebal_budget",
+            help="이번 달 DCA 예산 또는 추가 투입금. 이 금액으로 매수 비중 조정 우선 시도.")
+
+        if st.button("⚖ 리밸런싱 추천 계산", key="rebal_btn"):
+            st.session_state["show_rebal"] = True
+
+        if st.session_state.get("show_rebal", False):
+            # ── 리밸런싱 계산 엔진
+            # 목표 비중 기준 각 종목의 이상적 평가액
+            target_vals = {t: pv * info["weight"] for t,info in TICKERS.items()}
+            cur_vals    = {t: pvt.get(t,0) for t in TICKERS}
+            diffs       = {t: target_vals[t]-cur_vals[t] for t in TICKERS}  # +면 부족, -면 초과
+
+            # 1단계: 부족한 종목을 extra_budget으로 매수
+            buy_orders  = {}
+            sell_orders = {}
+            remaining_budget = extra_budget
+            shortfalls = {t:v for t,v in diffs.items() if v>0}
+            surpluses  = {t:-v for t,v in diffs.items() if v<0}
+
+            # 부족분 합계
+            total_shortfall = sum(shortfalls.values())
+
+            if total_shortfall > 0 and remaining_budget > 0:
+                # 예산 안에서 비율대로 매수
+                for t,need in sorted(shortfalls.items(), key=lambda x:-x[1]):
+                    buy_amt = min(need, remaining_budget * (need/total_shortfall))
+                    buy_amt = min(buy_amt, need)  # 초과 매수 방지
+                    if buy_amt > 10:
+                        buy_orders[t] = buy_amt
+                        remaining_budget -= buy_amt
+
+            # 매수 후 재계산
+            new_vals = {t: cur_vals[t]+buy_orders.get(t,0) for t in TICKERS}
+            new_total = sum(new_vals.values())
+            new_weights = {t: new_vals[t]/new_total if new_total>0 else 0 for t in TICKERS}
+            new_diffs = {t: TICKERS[t]["weight"]-new_weights[t] for t in TICKERS}
+
+            # 2단계: 매수 후에도 5% 이상 초과인 종목만 최소 매도
+            for t in TICKERS:
+                if new_weights.get(t,0) - TICKERS[t]["weight"] > 0.05:  # 5% 이상 초과만
+                    excess_val = (new_weights[t] - TICKERS[t]["weight"]) * new_total
+                    sell_orders[t] = excess_val
+
+            # ── 결과 표시
+            st.markdown("### 📋 추천 액션")
+
+            has_action = False
+
+            # 매수 추천
+            if buy_orders:
+                st.markdown('<div class="ok" style="margin-bottom:.5rem">✅ <b>매수 추천</b> (비중 부족 → 매수로 조정)</div>',unsafe_allow_html=True)
+                for t,amt in sorted(buy_orders.items(), key=lambda x:-x[1]):
+                    px_t=prices.get(t,0); sh=amt/px_t if px_t>0 else 0
+                    before=cw.get(t,0)*100; after=new_weights.get(t,0)*100
+                    info=TICKERS[t]
+                    st.markdown(f'''<div style="background:#0a2a0a;border:1px solid #3ecf8e44;border-radius:6px;padding:.8rem;margin-bottom:.4rem;display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <span style="font-family:Cinzel,serif;color:{info["color"]}">{t}</span>
+    <span style="font-size:.7rem;color:#6b7a99;margin-left:.5rem">매수</span><br>
+    <span style="font-size:.7rem;color:#9ba8bb">비중 {before:.1f}% → {after:.1f}% (목표 {info["weight"]*100:.0f}%)</span>
+  </div>
+  <div style="text-align:right">
+    <div style="font-family:Cinzel,serif;color:#3ecf8e;font-size:1.1rem">${amt:,.0f}</div>
+    <div style="font-size:.7rem;color:#6b7a99">{sh:.4f}주 @ ${px_t:,.2f}</div>
+  </div>
+</div>''',unsafe_allow_html=True)
+                    has_action = True
+
+            # 매도 추천 (최소화)
+            if sell_orders:
+                st.markdown('<div class="warn" style="margin-top:.5rem;margin-bottom:.5rem">⚠️ <b>매도 필요</b> (매수 후에도 5%↑ 초과 — 세금 고려해 최소 매도)</div>',unsafe_allow_html=True)
+                for t,amt in sorted(sell_orders.items(), key=lambda x:-x[1]):
+                    px_t=prices.get(t,0); sh=amt/px_t if px_t>0 else 0
+                    avg_c=pf["holdings"][t].get("avg_cost",0)
+                    gain=(px_t-avg_c)*sh if avg_c>0 else 0
+                    tax_est=gain*0.15  # 미국 장기 양도세 추정 (15%)
+                    info=TICKERS[t]
+                    st.markdown(f'''<div style="background:#2a0a0a;border:1px solid #e05c5c44;border-radius:6px;padding:.8rem;margin-bottom:.4rem">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <span style="font-family:Cinzel,serif;color:{info["color"]}">{t}</span>
+      <span style="font-size:.7rem;color:#6b7a99;margin-left:.5rem">매도</span>
+    </div>
+    <div style="text-align:right">
+      <div style="font-family:Cinzel,serif;color:#e05c5c;font-size:1.1rem">${amt:,.0f}</div>
+      <div style="font-size:.7rem;color:#6b7a99">{sh:.4f}주</div>
+    </div>
+  </div>
+  <div style="font-size:.68rem;color:#e08c3c;margin-top:.3rem">⚠️ 예상 세금(장기 15%): ~${tax_est:,.0f} — 가능하면 매수로만 조정 권장</div>
+</div>''',unsafe_allow_html=True)
+                    has_action = True
+
+            if not has_action:
+                st.markdown('<div class="ok">✅ 현재 비중이 목표 범위 내 — 리밸런싱 불필요</div>',unsafe_allow_html=True)
+
+            # 리밸런싱 후 예상 비중
+            st.markdown("---")
+            st.markdown('<div class="st2">📊 리밸런싱 후 예상 비중</div>',unsafe_allow_html=True)
+            for t,info in TICKERS.items():
+                cur=cw.get(t,0)*100; aft=new_weights.get(t,0)*100; tgt=info["weight"]*100
+                st.markdown(f'<div style="margin-bottom:.4rem"><div style="display:flex;justify-content:space-between;font-size:.7rem;margin-bottom:2px"><span style="color:{info["color"]}">{t}</span><span style="color:#6b7a99">{cur:.1f}% → <b style="color:#e8e6f0">{aft:.1f}%</b> (목표 {tgt:.0f}%)</span></div><div style="background:#1a2233;border-radius:3px;height:6px"><div style="width:{min(aft,100):.0f}%;height:6px;background:{info["color"]};border-radius:3px"></div></div></div>',unsafe_allow_html=True)
+
+    else:
+        st.markdown('<div class="info">📌 사이드바에서 보유 주식을 입력하면 활성화됩니다.</div>',unsafe_allow_html=True)
+
+    st.markdown("""<div class="card" style="margin-top:1rem"><div class="st2">📋 리밸런싱 원칙</div>
+<table><tr><th>원칙</th><th>설명</th></tr>
+<tr><td>매수 우선</td><td>비중 조정은 부족한 종목 매수로 먼저 해결</td></tr>
+<tr><td>매도 최소화</td><td>매수 후에도 5%↑ 초과 시에만 최소 매도</td></tr>
+<tr><td>세금 고려</td><td>1년 이상 보유 → 장기 양도세(15%) 적용</td></tr>
+<tr><td>Rule 1</td><td>IREN >50% → GOOGL 50%/MU 30%/NXE 20%</td></tr>
+<tr><td>Rule 2</td><td>GOOGL >40% → IREN 로테이션</td></tr>
+<tr><td>Rule 3</td><td>NXE 3개월 음봉 → 비중 +5%</td></tr>
+<tr><td>Rule 4</td><td>IONQ >10% → GOOGL 이동</td></tr>
 </table></div>""",unsafe_allow_html=True)
 
-# ── TAB 6: 목표 추적 ──
-with ta5:
+with ta3:
     st.markdown('<div class="st2">🎯 $500,000 목표 추적</div>',unsafe_allow_html=True)
     c1,c2,c3,c4=st.columns(4)
     with c1: st.markdown(f'<div class="mb card-g"><div class="ml">현재 포트 가치</div><div class="mv">${pv:,.0f}</div><div class="ms">목표 $500,000</div></div>',unsafe_allow_html=True)
