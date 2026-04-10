@@ -290,44 +290,122 @@ def fetch_uranium():
 
 def price_chart(df,t,ind):
     p=IND_P[t]; col=TICKERS[t]["color"]
-    # flatten MultiIndex columns if needed
     df2=df.copy()
     df2.columns=[c[0] if isinstance(c,tuple) else c for c in df2.columns]
-    idx=ind.get("_idx",df2.index); c=ind.get("_c",df2["Close"].astype(float).values)
+
+    # ── 전체 배열 (지표 계산은 1y 기준)
+    full_idx=ind.get("_idx",df2.index)
     ra=ind.get("_rsi_arr",np.array([])); rs=ind.get("_rsi_start",14)
     mh=ind.get("_mh",np.array([])); s80=ind.get("_s80",np.array([]))
     s200=ind.get("_s200",np.array([])); bu=ind.get("_bu",np.array([])); bl=ind.get("_bl",np.array([]))
-    o=df2["Open"].astype(float).values
-    h2=df2["High"].astype(float).values
-    l2=df2["Low"].astype(float).values
-    cl=df2["Close"].astype(float).values
-    fig=make_subplots(rows=3,cols=1,row_heights=[.55,.25,.20],shared_xaxes=True,vertical_spacing=.02)
+
+    # ── 3개월(63거래일)로 슬라이스
+    N=63
+    df3=df2.iloc[-N:] if len(df2)>N else df2
+    idx=df3.index
+    o=df3["Open"].astype(float).values
+    h2=df3["High"].astype(float).values
+    l2=df3["Low"].astype(float).values
+    cl=df3["Close"].astype(float).values
+
+    # 보조지표도 3개월치만
+    def tail(arr): return arr[-N:] if len(arr)>=N else arr
+    s80_=tail(s80); s200_=tail(s200); bu_=tail(bu); bl_=tail(bl); mh_=tail(mh)
+
+    # RSI 배열 — rsi_start 이후부터 시작하므로 별도 처리
+    rsi_full_idx=full_idx[rs:] if len(full_idx)>rs else full_idx
+    if len(ra)>0 and len(rsi_full_idx)==len(ra):
+        ra_=ra[-N:]; ri_=rsi_full_idx[-N:]
+    else:
+        ra_=np.array([]); ri_=np.array([])
+
+    # ── 종목별 RSI 기준선 (신호 구간)
+    rsi_p=IND_P[t]["rsi"]
+    if t=="IREN":
+        # STOP>60, 기본1×:35~60, 2×:<35, 3×:<25+폭락
+        zones=[
+            (0,25,"rgba(62,207,142,0.18)","🔥 3× 구간"),
+            (25,35,"rgba(62,207,142,0.10)","⚡ 2× 구간"),
+            (35,60,"rgba(79,163,224,0.08)","✅ 1× 구간"),
+            (60,100,"rgba(224,92,92,0.10)","❌ STOP"),
+        ]
+        thresholds=[(25,"#3ecf8e","25"),(35,"#c9a84c","35"),(60,"#e05c5c","60")]
+    elif t=="IONQ":
+        zones=[
+            (0,30,"rgba(62,207,142,0.18)","🔥 3×"),
+            (30,45,"rgba(62,207,142,0.10)","⚡ 2×"),
+            (45,65,"rgba(79,163,224,0.08)","✅ 1×"),
+            (65,100,"rgba(224,92,92,0.10)","❌ STOP"),
+        ]
+        thresholds=[(30,"#3ecf8e","30"),(45,"#c9a84c","45"),(65,"#e05c5c","65")]
+    elif t=="MU":
+        zones=[
+            (0,45,"rgba(62,207,142,0.12)","⚡ 2×"),
+            (45,65,"rgba(79,163,224,0.08)","✅ 1×"),
+            (65,100,"rgba(224,92,92,0.10)","❌ STOP"),
+        ]
+        thresholds=[(45,"#c9a84c","45"),(65,"#e05c5c","65")]
+    else:  # GOOGL, NXE
+        zones=[]; thresholds=[]
+
+    fig=make_subplots(
+        rows=3,cols=1,row_heights=[.52,.26,.22],
+        shared_xaxes=True,vertical_spacing=.02,
+        subplot_titles=("","RSI("+str(rsi_p)+") — 매수 신호 구간","MACD 히스토그램"))
+
+    # ── 캔들
     fig.add_trace(go.Candlestick(x=idx,open=o,high=h2,low=l2,close=cl,
         increasing=dict(line=dict(color=col)),
         decreasing=dict(line=dict(color="#e05c5c")),
         name=t),row=1,col=1)
-    if len(s80)==len(idx) and not np.all(np.isnan(s80)):
-        fig.add_trace(go.Scatter(x=idx,y=s80,name="SMA80",line=dict(color="#c9a84c",width=1,dash="dot")),row=1,col=1)
-    if len(s200)==len(idx) and not np.all(np.isnan(s200)):
-        fig.add_trace(go.Scatter(x=idx,y=s200,name="SMA200",line=dict(color="#9b6dff",width=1,dash="dot")),row=1,col=1)
-    if len(bu)==len(idx):
-        fig.add_trace(go.Scatter(x=idx,y=bu,line=dict(color="rgba(79,163,224,0.25)",width=1),showlegend=False),row=1,col=1)
-        fig.add_trace(go.Scatter(x=idx,y=bl,line=dict(color="rgba(79,163,224,0.25)",width=1),fill="tonexty",fillcolor="rgba(79,163,224,0.06)",showlegend=False),row=1,col=1)
-    if len(ra)>0:
-        ri=idx[rs:]
-        if len(ri)==len(ra):
-            fig.add_trace(go.Scatter(x=ri,y=ra,name="RSI",line=dict(color=col,width=1.5)),row=2,col=1)
-            fig.add_hline(y=60,line_color="rgba(224,92,92,0.35)",line_dash="dot",row=2,col=1)
-            fig.add_hline(y=35,line_color="rgba(62,207,142,0.35)",line_dash="dot",row=2,col=1)
-    if len(mh)==len(idx):
-        hc=["#3ecf8e" if(not np.isnan(v) and v>=0) else "#e05c5c" for v in mh]
-        fig.add_trace(go.Bar(x=idx,y=mh,marker_color=hc,opacity=.8,name="MACD"),row=3,col=1)
-    fig.update_layout(height=480,paper_bgcolor="#0f1620",plot_bgcolor="#070a0f",
+
+    # MA
+    if len(s80_)==len(idx) and not np.all(np.isnan(s80_)):
+        fig.add_trace(go.Scatter(x=idx,y=s80_,name="SMA80",line=dict(color="#c9a84c",width=1.2,dash="dot")),row=1,col=1)
+    if len(s200_)==len(idx) and not np.all(np.isnan(s200_)):
+        fig.add_trace(go.Scatter(x=idx,y=s200_,name="SMA200",line=dict(color="#9b6dff",width=1.2,dash="dot")),row=1,col=1)
+
+    # BB
+    if len(bu_)==len(idx):
+        fig.add_trace(go.Scatter(x=idx,y=bu_,line=dict(color="rgba(79,163,224,0.25)",width=1),showlegend=False),row=1,col=1)
+        fig.add_trace(go.Scatter(x=idx,y=bl_,line=dict(color="rgba(79,163,224,0.25)",width=1),
+            fill="tonexty",fillcolor="rgba(79,163,224,0.06)",showlegend=False),row=1,col=1)
+
+    # ── RSI + 신호 구간 색칠
+    if len(ra_)>0 and len(ri_)==len(ra_):
+        # 배경 존
+        for y0,y1,fc,label in zones:
+            fig.add_hrect(y0=y0,y1=y1,fillcolor=fc,line_width=0,row=2,col=1,
+                annotation_text=label,
+                annotation_position="left",
+                annotation_font=dict(size=8,color="rgba(255,255,255,0.5)"))
+        # RSI 선
+        fig.add_trace(go.Scatter(x=ri_,y=ra_,name=f"RSI({rsi_p})",
+            line=dict(color=col,width=2)),row=2,col=1)
+        # 기준선 + 라벨
+        for yv,lc,label in thresholds:
+            fig.add_hline(y=yv,line_color=lc,line_dash="dash",line_width=1,row=2,col=1)
+            fig.add_annotation(x=ri_[-1],y=yv,text=f" {label}",
+                font=dict(size=9,color=lc),showarrow=False,xanchor="left",row=2,col=1)
+
+    # ── MACD 히스토그램
+    if len(mh_)==len(idx):
+        hc=["#3ecf8e" if(not np.isnan(v) and v>=0) else "#e05c5c" for v in mh_]
+        fig.add_trace(go.Bar(x=idx,y=mh_,marker_color=hc,opacity=.85,name="MACD Hist"),row=3,col=1)
+        fig.add_hline(y=0,line_color="rgba(255,255,255,0.2)",line_width=1,row=3,col=1)
+
+    fig.update_layout(
+        height=560,paper_bgcolor="#0f1620",plot_bgcolor="#070a0f",
         font=dict(family="IBM Plex Mono",size=10,color="#6b7a99"),
-        margin=dict(l=0,r=0,t=20,b=0),showlegend=False,xaxis_rangeslider_visible=False)
+        margin=dict(l=0,r=40,t=30,b=0),
+        showlegend=True,
+        legend=dict(bgcolor="rgba(0,0,0,0)",font=dict(size=9),x=0,y=1),
+        xaxis_rangeslider_visible=False)
     for i in range(1,4):
         fig.update_xaxes(gridcolor="#1e2a3a",row=i,col=1)
         fig.update_yaxes(gridcolor="#1e2a3a",row=i,col=1)
+    # RSI y축 고정
+    fig.update_yaxes(range=[0,100],row=2,col=1)
     return fig
 
 def pie_chart(wts,vals):
