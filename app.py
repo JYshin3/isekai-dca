@@ -282,14 +282,14 @@ def price_chart(df,t,ind):
     if len(s200)==len(idx) and not np.all(np.isnan(s200)):
         fig.add_trace(go.Scatter(x=idx,y=s200,name="SMA200",line=dict(color="#9b6dff",width=1,dash="dot")),row=1,col=1)
     if len(bu)==len(idx):
-        fig.add_trace(go.Scatter(x=idx,y=bu,line=dict(color="#4fa3e044",width=1),showlegend=False),row=1,col=1)
-        fig.add_trace(go.Scatter(x=idx,y=bl,line=dict(color="#4fa3e044",width=1),fill="tonexty",fillcolor="#4fa3e011",showlegend=False),row=1,col=1)
+        fig.add_trace(go.Scatter(x=idx,y=bu,line=dict(color="rgba(79,163,224,0.25)",width=1),showlegend=False),row=1,col=1)
+        fig.add_trace(go.Scatter(x=idx,y=bl,line=dict(color="rgba(79,163,224,0.25)",width=1),fill="tonexty",fillcolor="rgba(79,163,224,0.06)",showlegend=False),row=1,col=1)
     if len(ra)>0:
         ri=idx[rs:]
         if len(ri)==len(ra):
             fig.add_trace(go.Scatter(x=ri,y=ra,name="RSI",line=dict(color=col,width=1.5)),row=2,col=1)
-            fig.add_hline(y=60,line_color="#e05c5c55",line_dash="dot",row=2,col=1)
-            fig.add_hline(y=35,line_color="#3ecf8e55",line_dash="dot",row=2,col=1)
+            fig.add_hline(y=60,line_color="rgba(224,92,92,0.35)",line_dash="dot",row=2,col=1)
+            fig.add_hline(y=35,line_color="rgba(62,207,142,0.35)",line_dash="dot",row=2,col=1)
     if len(mh)==len(idx):
         hc=["#3ecf8e" if(not np.isnan(v) and v>=0) else "#e05c5c" for v in mh]
         fig.add_trace(go.Bar(x=idx,y=mh,marker_color=hc,opacity=.8,name="MACD"),row=3,col=1)
