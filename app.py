@@ -450,31 +450,29 @@ with st.sidebar:
     st.markdown("---")
     st.markdown('<div class="st2">📁 포트폴리오</div>',unsafe_allow_html=True)
     with st.expander("보유 주식 입력"):
-        st.markdown('<div style="font-size:.68rem;color:#6b7a99;margin-bottom:.8rem">💡 투자금액 입력 시 평단가는 현재가 자동 적용.<br>평단가를 직접 수정하면 그 값으로 계산.</div>',unsafe_allow_html=True)
         for t in TICKERS:
             h=pf["holdings"][t]
             px_now=prices.get(t,0)
-            invested_amt=round(h["shares"]*h["avg_cost"],2) if h["avg_cost"]>0 else 0.
-            # 저장된 평단가 없으면 현재가 자동 사용
-            saved_avg=float(h["avg_cost"]) if h["avg_cost"]>0 else float(px_now)
-            st.markdown(f'<div style="font-size:.72rem;color:#c9a84c;margin-top:.6rem;font-family:Cinzel,serif">{t}</div>',unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:.75rem;color:#c9a84c;margin-top:.7rem;font-family:Cinzel,serif;border-bottom:1px solid #1e2a3a;padding-bottom:2px">{t} · 현재가 ${px_now:,.2f}</div>',unsafe_allow_html=True)
             c1,c2=st.columns(2)
             with c1:
-                new_amt=st.number_input(f"투자금액 ($)",0.,value=float(invested_amt),step=10.,key=f"amt{t}")
+                h["shares"]=st.number_input(
+                    "보유 주수",0.,
+                    value=round(float(h["shares"]),2),
+                    step=0.01,format="%.2f",
+                    key=f"sh{t}")
             with c2:
-                avg=st.number_input(f"평단가 ($)",0.,value=saved_avg,step=.01,key=f"a{t}",
-                    help="비워두면 현재가 자동 적용")
-            # 평단가 0이면 현재가로
-            use_avg=avg if avg>0 else px_now
-            h["avg_cost"]=use_avg
-            h["shares"]=new_amt/use_avg if use_avg>0 else 0.
+                h["avg_cost"]=st.number_input(
+                    "평균단가 ($)",0.,
+                    value=float(h["avg_cost"]) if h["avg_cost"]>0 else float(px_now),
+                    step=0.01,format="%.2f",
+                    key=f"a{t}")
+            # 미리보기
             cur_val=h["shares"]*px_now
-            pnl_pct=(px_now-use_avg)/use_avg*100 if use_avg>0 else 0.
+            pnl_pct=(px_now-h["avg_cost"])/h["avg_cost"]*100 if h["avg_cost"]>0 else 0.
             col_c="#3ecf8e" if pnl_pct>=0 else "#e05c5c"
-            if new_amt>0 and px_now>0:
-                st.markdown(f'<div style="font-size:.65rem;color:{col_c};margin-bottom:.3rem;padding:.3rem .5rem;background:#0a1a0a;border-radius:3px">→ {h["shares"]:.4f}주 · 평가액 ${cur_val:,.0f} ({pnl_pct:+.1f}%)</div>',unsafe_allow_html=True)
-            elif px_now>0:
-                st.markdown(f'<div style="font-size:.62rem;color:#6b7a99;margin-bottom:.3rem">현재가 ${px_now:,.2f}</div>',unsafe_allow_html=True)
+            if h["shares"]>0:
+                st.markdown(f'<div style="font-size:.65rem;color:{col_c};margin-bottom:.2rem">평가액 ${cur_val:,.0f} ({pnl_pct:+.1f}%)</div>',unsafe_allow_html=True)
         pf["total_invested"]=sum(h["shares"]*h["avg_cost"] for h in pf["holdings"].values())
         pf["start_date"]=st.text_input("시작일 (YYYY-MM-DD)",pf.get("start_date",datetime.now().strftime("%Y-%m-%d")))
     if st.button("💾 저장"): save_pf(pf); st.success("저장됨!")
