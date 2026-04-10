@@ -497,7 +497,6 @@ elapsed=max((datetime.now()-start).days/30,.1); remaining=max(MONTHS-elapsed,0)
 pvt={t:hl[t]["shares"]*prices.get(t,0) for t in TICKERS}
 cw={t:v/pv if pv>0 else 0 for t,v in pvt.items()}
 
-ta0,ta1,ta2,ta3,ta4,ta5=st.tabs(["🎯 오늘 살까?","📡 신호 현황","📊 종목 분석","📅 이번달 계획","⚖ 리밸런싱","🏆 목표 추적"])
 ta0,ta1,ta2,ta3=st.tabs(["🎯 오늘 살까?","📊 종목 분석","⚖ 리밸런싱","🏆 목표 추적"])
 
 with ta0:
@@ -670,6 +669,24 @@ with ta0:
   &nbsp;·&nbsp; 오늘 <span style="color:{"#3ecf8e" if iren_chg>=0 else "#e05c5c"}">{iren_chg:+.1f}%</span>
   &nbsp;·&nbsp; 1주 <span style="color:{"#3ecf8e" if iren_1w>=0 else "#e05c5c"}">{iren_1w:+.1f}%</span>
 </div></div>''',unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown('<div class="st2">📅 이번달 DCA 계획</div>',unsafe_allow_html=True)
+    extra=alloc.get("GOOGL",0)-600
+    if extra>0: st.markdown(f'<div class="info">ℹ️ 신호 미충족 → GOOGL 추가 흡수 +${extra:.0f} (총 ${alloc["GOOGL"]:,.0f})</div>',unsafe_allow_html=True)
+    rw_plan=[]
+    for t_p,info_p in TICKERS.items():
+        sg_p=sigs[t_p]; amt_p=alloc.get(t_p,0); px_p=prices.get(t_p,0)
+        sh_p=amt_p/px_p if px_p>0 and amt_p>0 else 0
+        rw_plan.append({"종목":t_p,"신호":sg_p["txt"],"배율":f"{sg_p['mul']}×","배정액":f"${amt_p:,.0f}","매수주수":f"{sh_p:.4f}" if sh_p>0 else "—","현재가":f"${px_p:,.2f}"})
+    st.dataframe(pd.DataFrame(rw_plan),use_container_width=True,hide_index=True)
+    st.markdown('''<div class="card" style="margin-top:.8rem"><div class="st2">📌 월별 운용 규칙</div>
+<table><tr><th>단계</th><th>행동</th><th>비고</th></tr>
+<tr><td>1</td><td>GOOGL $600 선매수</td><td>매달 고정</td></tr>
+<tr><td>2~5</td><td>IREN→MU→NXE→IONQ 신호순</td><td>우선순위 예산 배분</td></tr>
+<tr><td>6</td><td>잔액 → GOOGL 추가</td><td>100% 집행 원칙</td></tr>
+</table></div>''',unsafe_allow_html=True)
+
 
 
 with ta1:
