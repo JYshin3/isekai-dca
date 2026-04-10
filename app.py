@@ -259,6 +259,35 @@ def fetch(t,period="1y"):
         return df
     except: return pd.DataFrame()
 
+@st.cache_data(ttl=3600)  # 1시간 캐시
+def fetch_uranium():
+    """
+    우라늄 현물가 자동 수집
+    1순위: UX=F (CME 우라늄 선물, U3O8 $/lb) — 현물가와 거의 동일
+    2순위: CCJ(Cameco) 주가 기반 추정
+    """
+    # UX=F: CME Uranium Futures (U3O8 $/lb)
+    try:
+        df=yf.download("UX=F",period="5d",progress=False,auto_adjust=True)
+        if not df.empty:
+            df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+            px=float(df["Close"].dropna().iloc[-1])
+            if 20<px<300:
+                return round(px,2),"UX=F (CME 우라늄 선물)"
+    except: pass
+    # 백업: Global X Uranium ETF NAV 기반 (거칠지만 방향성 맞음)
+    try:
+        df=yf.download("CCJ",period="5d",progress=False,auto_adjust=True)
+        if not df.empty:
+            df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+            px=float(df["Close"].dropna().iloc[-1])
+            # CCJ ≈ 우라늄가 * 0.55 경험적 환산
+            est=round(px/0.55,1)
+            if 20<est<300:
+                return est,"CCJ 기반 추정"
+    except: pass
+    return None,"자동 수집 실패"
+
 def price_chart(df,t,ind):
     p=IND_P[t]; col=TICKERS[t]["color"]
     # flatten MultiIndex columns if needed
@@ -321,10 +350,19 @@ with st.spinner("시장 데이터 로딩 중..."):
         if not df.empty:
             ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
         else: inds[t]={}; prices[t]=0
+    # 우라늄 현물가 자동 수집
+    u_auto,u_src=fetch_uranium()
 
 with st.sidebar:
     st.markdown('<div class="st2">⚙ 설정</div>',unsafe_allow_html=True)
-    uranium=st.number_input("우라늄 현물가 ($/lb)",30.,150.,float(pf.get("uranium",68.)),.5)
+    # 자동 수집값 우선, 실패 시 저장값 사용
+    u_default=u_auto if u_auto else float(pf.get("uranium",68.))
+    if u_auto:
+        st.markdown(f'<div style="font-size:.65rem;color:#3ecf8e;margin-bottom:.3rem">🤖 자동 수집: ${u_auto} ({u_src})</div>',unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div style="font-size:.65rem;color:#e08c3c;margin-bottom:.3rem">⚠️ 자동 수집 실패 — 저장값 사용 (${pf.get("uranium",68.)})</div>',unsafe_allow_html=True)
+    uranium=st.number_input("우라늄 현물가 ($/lb) — 수동 보정",30.,150.,u_default,.5,
+        help="자동 수집값이 틀렸을 때만 조정하세요")
     pf["uranium"]=uranium
     earn_mu=st.checkbox("MU 실적 후 -10% 급락?",value=pf.get("earn_mu",False))
     pf["earn_mu"]=earn_mu
