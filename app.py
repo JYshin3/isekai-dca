@@ -48,19 +48,15 @@ td{padding:.55rem .5rem;border-bottom:1px solid #1e2a3a30;}
 
 # ── CONSTANTS ──
 TICKERS = {
-    "GOOGL":{"name":"Alphabet",         "weight":.30,"color":"#4fa3e0","base":600},
+    "GOOGL":{"name":"Alphabet",         "weight":.40,"color":"#4fa3e0","base":800},
     "IREN": {"name":"IREN Ltd",          "weight":.40,"color":"#c9a84c","base":800},
-    "NXE":  {"name":"NexGen Energy",     "weight":.10,"color":"#9b6dff","base":200},
-    "IONQ": {"name":"IonQ",              "weight":.05,"color":"#e05c5c","base":100},
-    "MU":   {"name":"Micron Technology", "weight":.15,"color":"#3ecf8e","base":300},
+    "MU":   {"name":"Micron Technology", "weight":.20,"color":"#3ecf8e","base":400},
 }
 BUDGET=2000; TARGET=500000; MONTHS=36; PF_FILE=Path("portfolio.json")
 IND_P={
     "GOOGL":{"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.0,"atr":14,"adx":14},
     "IREN": {"rsi":20,"sk":20,"sd":10,"macd":(20,40,9),"bbs":2.5,"atr":20,"adx":20},
-    "NXE":  {"rsi":20,"sk":20,"sd":10,"macd":(20,40,9),"bbs":2.0,"atr":20,"adx":20},
     "MU":   {"rsi":20,"sk":20,"sd":10,"macd":(24,52,9),"bbs":2.5,"atr":20,"adx":20},
-    "IONQ": {"rsi":14,"sk":14,"sd":14,"macd":(24,52,9),"bbs":2.0,"atr":14,"adx":14},
 }
 
 # ── INDICATORS ──
@@ -174,30 +170,55 @@ def compute(df,p):
     }
 
 # ── SIGNALS ──
-def sg_googl(i): return {"mul":1,"txt":"✅ 고정 매수 (DCA 앵커)","amt":600}
+def sg_googl(i): return {"mul":1,"txt":"✅ 고정 매수 (DCA 앵커)","amt":800}
 
 def sg_iren(i):
     rv=i.get("rsi",50); at=i.get("atr",0); ata=i.get("atr_avg",1)
     px=i.get("price",0); e20=i.get("ema20",px); mh=i.get("macd_hist",0)
     mhp=i.get("macd_hist_prev",mh); sk=i.get("stoch_k",50); sd=i.get("stoch_d",50)
     hl=i.get("higher_low",False); pc=i.get("price_chg",0)
+    adv=i.get("adx",20); vs=i.get("vol_spike",1.0); sma80=i.get("sma80",px)
     ax=(at>ata*2) if ata>0 else False
-    # RSI 기반 기본 배율
-    if rv>60 or ax:
-        mx,txt=0,"❌ 매수 중단 (RSI 과열)" if rv>60 else "❌ 변동성 과다"
+
+    # ── 추세 매수 조건 (RSI 과열이지만 불장 판단)
+    trend_conds={
+        "ADX>30 (강한추세)": adv>30,
+        "주가>SMA80 (추세위)": px>sma80,
+        "MACD 상승중": mh>mhp and mh>0,
+        "거래량 1.5× ↑": vs>=1.5,
+    }
+    trend_cnt=sum(trend_conds.values())
+    is_trend_bull=(rv>60 and rv<=75 and trend_cnt>=2 and not ax)
+
+    # ── RSI 기반 배율 결정
+    if rv>75 or ax:
+        # 완전 과열 or 변동성 폭발 → 무조건 STOP
+        mx,txt=0,"❌ STOP (RSI>75)" if rv>75 else "❌ STOP (변동성 폭발)"
+    elif is_trend_bull:
+        # RSI 60~75 + 추세 조건 2개↑ → 추세 매수 1×
+        mx,txt=1,f"📈 추세 매수 (RSI {rv:.0f}, 불장 {trend_cnt}/4조건)"
     elif rv<25 and pc<=-10:
         mx,txt=3,"🔥 3배 매수 (RSI<25+폭락)"
     elif rv<35:
         mx,txt=2,"⚡ 2배 매수 (RSI<35)"
-    else:
+    elif rv<=60:
         mx,txt=1,"✅ 기본 매수"
-    # 불타기: 2개↑ 충족 시 배율 1단계 업 (예:에A개서 B배, 최대 3배)
+    else:
+        # RSI 60~75 but 추세 조건 미충족 → STOP
+        mx,txt=0,f"⏸ 대기 (RSI {rv:.0f}, 추세조건 {trend_cnt}/4 미충족)"
+
+    # ── 불타기: 과매도 구간에서만 (추세매수에는 적용 안함)
     ign={"MA20 위 회복":px>e20,"MACD 히스토 상승":mh>mhp,"Higher Low":hl,"StochRSI 20→40":sk>40 and sk>sd and sk>20}
     ic=sum(ign.values())
-    if ic>=2 and mx>0:
+    if ic>=2 and mx>0 and not is_trend_bull:
         mx=min(mx+1,3)
-        txt=txt+" 🔥불타기("+str(ic)+"/4)\u2192"+str(mx)+"배"
-    return {"mul":mx,"txt":txt,"amt":min(800*mx,BUDGET-600),"ign":ign,"ic":ic}
+        txt=txt+" 🔥불타기("+str(ic)+"/4)→"+str(mx)+"배"
+
+    # 추세 매수면 1,000 (나머지 예산 전부), 아니면 800*mul
+    amt=1000 if is_trend_bull else min(800*mx, 1000)
+
+    return {"mul":mx,"txt":txt,"amt":amt,"ign":ign,"ic":ic,
+            "is_trend":is_trend_bull,"trend_conds":trend_conds,"trend_cnt":trend_cnt}
 
 def sg_nxe(i,u):
     if u>82: mx,txt=0,f"❌ 매수 중단 (${u:.0f})"
@@ -214,24 +235,103 @@ def sg_ionq(i):
     else: mx,txt=3,f"🔥 3배 매수 (RSI {rv:.0f})"
     return {"mul":mx,"txt":txt,"amt":100*mx}
 
-def sg_mu(i,ed):
-    rv=i.get("rsi",50)
-    if rv>65: mx,txt=0,f"❌ 매수 중단 (RSI {rv:.0f})"
-    elif rv>=45: mx,txt=1,f"✅ 기본 매수 (RSI {rv:.0f})"
-    else: mx,txt=2,f"⚡ 2배 매수 (RSI {rv:.0f})"
-    b=300 if(ed and mx>0) else 0
-    if b: txt+=" +실적급락$300"
-    return {"mul":mx,"txt":txt,"amt":300*mx+b}
+def sg_mu(i,ed,earn_drop_pct=0.):
+    """
+    MU 3조건 독립 적용:
+    조건1: $200 최소 보장 (무조건, IREN 상태 무관)
+    조건2: 실적 급락 보너스 (-5%→+$200, -10%→+$400)
+    조건3: RSI 과매도 보너스 (<40→+$200, <30→+$400)
+    보너스 최대 $400 (중복 상한)
+    총 최대 $600 (IREN STOP 시)
+    """
+    rv=i.get("rsi",50); zs=i.get("z_score",0)
+
+    # 과열 판단
+    is_hot=(rv>65 and zs>1.5)
+
+    # 기본 $200 보장 (과열이어도 최소는 삼)
+    base=200
+
+    # 실적 급락 보너스
+    earn_bonus=0
+    earn_txt=""
+    if ed:
+        if earn_drop_pct<=-10:
+            earn_bonus=400; earn_txt=f" +실적급락{earn_drop_pct:.0f}% +$400"
+        elif earn_drop_pct<=-5:
+            earn_bonus=200; earn_txt=f" +실적급락{earn_drop_pct:.0f}% +$200"
+        else:
+            earn_bonus=200; earn_txt=" +실적급락 +$200"
+
+    # RSI 과매도 보너스
+    rsi_bonus=0
+    rsi_txt=""
+    if not is_hot:
+        if rv<30:
+            rsi_bonus=400; rsi_txt=f" +RSI {rv:.0f} 극과매도 +$400"
+        elif rv<40:
+            rsi_bonus=200; rsi_txt=f" +RSI {rv:.0f} 과매도 +$200"
+
+    # 보너스 상한 $400
+    total_bonus=min(earn_bonus+rsi_bonus, 400)
+    total_amt=base+total_bonus
+
+    # 상태 텍스트
+    if is_hot:
+        status_txt=f"🌡️ 과열(RSI {rv:.0f}+Z{zs:+.1f}) — 최소 $200만"
+    elif rv<30:
+        status_txt=f"🔥 극과매도 RSI {rv:.0f}"
+    elif rv<40:
+        status_txt=f"⚡ 과매도 RSI {rv:.0f}"
+    elif rv<50:
+        status_txt=f"✅ 매수구간 RSI {rv:.0f}"
+    else:
+        status_txt=f"✅ 정기매수 RSI {rv:.0f}"
+
+    full_txt=status_txt+earn_txt+rsi_txt
+
+    return {
+        "mul":1,"txt":full_txt,"amt":total_amt,
+        "base":base,"earn_bonus":earn_bonus,"rsi_bonus":rsi_bonus,
+        "is_hot":is_hot,"is_stop":False,  # MU는 STOP 없음, 최소 $200
+    }
 
 def allocate(sigs):
-    a={"GOOGL":600}; sp=600
-    for t in ["IREN","MU","NXE","IONQ"]:
-        amt=sigs[t]["amt"]
-        if amt>0 and sp+amt<=BUDGET: a[t]=amt; sp+=amt
-        elif amt>0 and sp<BUDGET: a[t]=BUDGET-sp; sp=BUDGET
-        else: a[t]=0
-    lft=BUDGET-sp
-    if lft>0: a["GOOGL"]+=lft
+    """
+    새 예산 배분 로직:
+    1) GOOGL $800 선집행 (고정)
+    2) MU $200 최소 보장 (무조건)
+    3) 나머지 $1,000:
+       - IREN 매수 가능 → IREN 우선 투입 (최대 $1,000)
+         MU 보너스는 적용 안함 (최소 $200만)
+       - IREN STOP → MU 보너스 적용 + 잔액 GOOGL
+    4) 잔액 → GOOGL 흡수
+    """
+    iren_sig=sigs.get("IREN",{}); mu_sig=sigs.get("MU",{})
+    iren_can_buy=(iren_sig.get("mul",0)>0)
+    remaining=BUDGET-800-200  # $1,000
+
+    a={"GOOGL":800,"MU":200,"IREN":0}
+
+    if iren_can_buy:
+        # IREN 우선: 나머지 $1,000 전부 IREN
+        iren_want=iren_sig.get("amt",0)
+        iren_get=min(iren_want, remaining)
+        a["IREN"]=iren_get
+        leftover=remaining-iren_get
+        # MU는 최소 $200만 (보너스 없음)
+        if leftover>0:
+            a["GOOGL"]+=leftover  # 남은 건 GOOGL
+    else:
+        # IREN STOP → MU에 보너스 적용
+        mu_total=mu_sig.get("amt",200)  # base $200 + 보너스
+        mu_get=min(mu_total, remaining)
+        a["MU"]=mu_get
+        leftover=remaining-mu_get
+        a["IREN"]=0
+        if leftover>0:
+            a["GOOGL"]+=leftover
+
     return a
 
 # ── PORTFOLIO ──
@@ -409,24 +509,6 @@ def price_chart(df,t,ind):
             (60,100,"rgba(224,92,92,0.10)","❌ STOP"),
         ]
         thresholds=[(25,"#3ecf8e","25"),(35,"#c9a84c","35"),(60,"#e05c5c","60")]
-    elif t=="IONQ":
-        zones=[
-            (0,30,"rgba(62,207,142,0.18)","🔥 3×"),
-            (30,45,"rgba(62,207,142,0.10)","⚡ 2×"),
-            (45,65,"rgba(79,163,224,0.08)","✅ 1×"),
-            (65,100,"rgba(224,92,92,0.10)","❌ STOP"),
-        ]
-        thresholds=[(30,"#3ecf8e","30"),(45,"#c9a84c","45"),(65,"#e05c5c","65")]
-    elif t=="MU":
-        zones=[
-            (0,45,"rgba(62,207,142,0.12)","⚡ 2×"),
-            (45,65,"rgba(79,163,224,0.08)","✅ 1×"),
-            (65,100,"rgba(224,92,92,0.10)","❌ STOP"),
-        ]
-        thresholds=[(45,"#c9a84c","45"),(65,"#e05c5c","65")]
-    else:  # GOOGL, NXE
-        zones=[]; thresholds=[]
-
     fig=make_subplots(
         rows=3,cols=1,row_heights=[.52,.26,.22],
         shared_xaxes=True,vertical_spacing=.02,
@@ -507,26 +589,21 @@ with st.spinner("시장 데이터 로딩 중..."):
         if not df.empty:
             ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
         else: inds[t]={}; prices[t]=0
-    # 우라늄 현물가 자동 수집
-    u_auto,u_src=fetch_uranium()
+    u_auto,u_src=None,"미사용"  # NXE 제외
 
 with st.sidebar:
     st.markdown('<div class="st2">⚙ 설정</div>',unsafe_allow_html=True)
     # 우라늄 자동수집 — 범위 강제 클램프 후 사용
-    saved_u=float(pf.get("uranium",68.))
-    if u_auto and 30<=u_auto<=148:
-        u_default=u_auto
-        st.markdown(f'<div style="font-size:.65rem;color:#3ecf8e;margin-bottom:.3rem">🤖 자동: ${u_auto:.1f}/lb ({u_src})</div>',unsafe_allow_html=True)
-    else:
-        u_default=min(max(saved_u,30.),148.)  # 항상 30~148 범위
-        msg=f"자동수집 실패 — 저장값 ${saved_u:.1f}" if not u_auto else f"범위초과(${u_auto}) — 저장값 사용"
-        st.markdown(f'<div style="font-size:.65rem;color:#e08c3c;margin-bottom:.3rem">⚠️ {msg}</div>',unsafe_allow_html=True)
-    uranium=st.number_input("우라늄 ($/lb) 수동보정",30.,148.,float(u_default),.5,
-        help="자동값 이상할 때만 조정")
-    st.markdown('<a href="https://tradingeconomics.com/commodity/uranium" target="_blank" style="font-size:.65rem;color:#c9a84c;text-decoration:none">📊 우라늄 현물가 확인 →</a>',unsafe_allow_html=True)
-    pf["uranium"]=uranium
-    earn_mu=st.checkbox("MU 실적 후 -10% 급락?",value=pf.get("earn_mu",False))
+    earn_mu=st.checkbox("MU 실적 발표 후 급락?",value=pf.get("earn_mu",False))
     pf["earn_mu"]=earn_mu
+    if earn_mu:
+        earn_drop_pct=st.number_input("급락 폭 (%)",min_value=-50.,max_value=0.,
+            value=float(pf.get("earn_drop_pct",-5.)),step=0.5,
+            help="-5% → +$200 보너스 / -10% → +$400 보너스")
+        pf["earn_drop_pct"]=earn_drop_pct
+    else:
+        pf["earn_drop_pct"]=0.
+    uranium=68.  # NXE 제외로 우라늄 모니터 불필요
     st.markdown("---")
     st.markdown('<div class="st2">📁 포트폴리오</div>',unsafe_allow_html=True)
     # 매매일지에서 자동 계산
@@ -553,12 +630,11 @@ with st.sidebar:
     if st.button("🔄 새로고침"): st.cache_data.clear(); st.rerun()
     st.markdown(f'<div style="color:#6b7a99;font-size:.65rem;margin-top:1rem">{datetime.now().strftime("%Y-%m-%d %H:%M")} UTC</div>',unsafe_allow_html=True)
 
+earn_drop_pct=pf.get("earn_drop_pct",0.)
 sigs={
     "GOOGL":sg_googl(inds.get("GOOGL",{})),
     "IREN": sg_iren(inds.get("IREN",{})),
-    "NXE":  sg_nxe(inds.get("NXE",{}),uranium),
-    "IONQ": sg_ionq(inds.get("IONQ",{})),
-    "MU":   sg_mu(inds.get("MU",{}),earn_mu),
+    "MU":   sg_mu(inds.get("MU",{}),earn_mu,earn_drop_pct),
 }
 alloc=allocate(sigs)
 
@@ -606,56 +682,64 @@ with ta0:
 
         if t=="GOOGL":
             if is_month_start:
-                return "🟢","지금 사세요","월초(1~7일) — 고정 DCA 집행 타이밍","$600 매수"
+                return "🟢","지금 사세요","월초(1~7일) — 고정 DCA 집행 타이밍","$800 매수"
             else:
                 return "🟡","월말 대기","GOOGL은 매월 1~7일에 매수. 아직 기다리세요","—"
 
         if t=="IREN":
-            # 과열 판단
-            if rv>60 or (atr>atr_a*2 and atr_a>0):
-                return "🔴","오늘은 패스","RSI 과열(>60) 또는 변동성 폭발 — 눌림 기다려요","매수 금지"
-            # 강한 매수 (2~3배 구간)
+            is_trend=sg.get("is_trend",False)
+            trend_conds=sg.get("trend_conds",{})
+            trend_cnt=sg.get("trend_cnt",0)
+            ic=sg.get("ic",0)
+            # 완전 STOP
+            if rv>75 or (atr>atr_a*2 and atr_a>0):
+                return "🔴","오늘은 패스",f"RSI {rv:.0f}>75 완전 과열 or 변동성 폭발 — 기다려요","매수 금지"
+            # 추세 매수 (불장)
+            if is_trend:
+                cond_txt=" · ".join(f"{'✅' if v else '❌'} {k}" for k,v in trend_conds.items())
+                return "🟢","지금 사세요 📈",f"불장 추세 매수! RSI {rv:.0f}, {trend_cnt}/4조건 충족 | {cond_txt}",f"${alloc_amt:,.0f} (추세 1×)"
+            # RSI 60~75, 추세 조건 미충족
+            if rv>60:
+                cond_txt=" · ".join(f"{'✅' if v else '❌'} {k}" for k,v in trend_conds.items())
+                return "🟡","대기",f"RSI {rv:.0f} 과열, 추세조건 {trend_cnt}/4 미충족 | {cond_txt}","—"
+            # 3배 구간
+            if rv<25:
+                reasons=[]
+                if zs<-1.5: reasons.append(f"Z-Score {zs:+.1f}")
+                if mh>mhp:  reasons.append("MACD 반등")
+                if chg1w<-5:reasons.append(f"1주 -{abs(chg1w):.0f}%")
+                r=", ".join(reasons) if reasons else "극과매도"
+                return "🟢","지금 사세요 🔥🔥",f"RSI {rv:.0f} 극과매도 — {r}",f"${alloc_amt:,.0f} ({mul}×)"
+            # 2배 구간
             if rv<35:
                 reasons=[]
                 if zs<-1.5: reasons.append(f"Z-Score {zs:+.1f} 저평가")
                 if mh>mhp:  reasons.append("MACD 반등 중")
-                if chg1w<-5:reasons.append(f"1주 -{abs(chg1w):.0f}% 낙폭")
-                r=", ".join(reasons) if reasons else "RSI 과매도"
+                r=", ".join(reasons) if reasons else "과매도"
                 return "🟢","지금 사세요 ⚡",f"RSI {rv:.0f} — {r}",f"${alloc_amt:,.0f} ({mul}×)"
-            # 불타기 조건 충족
-            ic=sg.get("ic",0)
-            if ic>=2 and rv<60:
-                return "🟢","지금 사세요 🔥",f"불타기 {ic}/4 충족 — 모멘텀 확인됨",f"${alloc_amt:,.0f} ({mul}×)"
-            # 중립 구간
+            # 불타기
+            if ic>=2:
+                return "🟢","지금 사세요 🔥",f"불타기 {ic}/4 — 모멘텀 확인",f"${alloc_amt:,.0f} ({mul}×)"
+            # 중립
             if 35<=rv<=50:
-                return "🟡","조금 기다려요",f"RSI {rv:.0f} 중립 — 더 눌리면 더 좋음. 급하지 않으면 대기","$800 (1×)"
-            if 50<rv<=60:
-                return "🟡","관망","RSI {:.0f} 중상단 — 오늘보단 내일이 나을 수도".format(rv),"—"
-
-        if t=="NXE":
-            if uranium>82:
-                return "🔴","오늘은 패스",f"우라늄 ${uranium:.0f} > $82 — 매수 구간 아님","매수 금지"
-            if uranium<70:
-                return "🟢","지금 사세요 🔥",f"우라늄 ${uranium:.0f} < $70 — 3배 구간. 사이클 바닥",f"${alloc_amt:,.0f} (3×)"
-            if uranium<75:
-                return "🟢","지금 사세요",f"우라늄 ${uranium:.0f} 2배 구간",f"${alloc_amt:,.0f} (2×)"
-            return "🟡","기본 매수",f"우라늄 ${uranium:.0f} 1배 구간 — 급하진 않음",f"${alloc_amt:,.0f} (1×)"
-
-        if t=="IONQ":
-            if rv>65:
-                return "🔴","오늘은 패스",f"RSI {rv:.0f} 과열 — 조정 기다려요","매수 금지"
-            if rv<30:
-                return "🟢","지금 사세요 🔥",f"RSI {rv:.0f} 극과매도 — 3배 구간",f"${alloc_amt:,.0f}"
-            if rv<45:
-                return "🟢","지금 사세요",f"RSI {rv:.0f} 매수 구간",f"${alloc_amt:,.0f}"
-            return "🟡","관망",f"RSI {rv:.0f} 중립 — IONQ는 더 눌릴 때 사는 게 유리","—"
+                return "🟡","조금 기다려요",f"RSI {rv:.0f} 중립 — 더 눌리면 더 좋음","$800 (1×)"
+            return "🟡","관망",f"RSI {rv:.0f} 중상단 — 눌림 기다려요","—"
 
         if t=="MU":
-            if rv>65:
-                return "🔴","오늘은 패스",f"RSI {rv:.0f} 과열","매수 금지"
-            if rv<45:
-                return "🟢","지금 사세요",f"RSI {rv:.0f} — AI 메모리 사이클 눌림목",f"${alloc_amt:,.0f}"
-            return "🟡","관망",f"RSI {rv:.0f} 중립 — 실적발표 전후 급락 시 매수 기회","—"
+            mu_amt=alloc.get("MU",200)
+            earn_bonus=sg.get("earn_bonus",0)
+            rsi_bonus=sg.get("rsi_bonus",0)
+            is_hot=sg.get("is_hot",False)
+            # 항상 사는 종목 — 상태만 다름
+            if is_hot:
+                return "🟡","최소 매수 ($200)",f"RSI {rv:.0f} 과열 — 정기 $200만 집행. IREN STOP이면 보너스 없음",f"${mu_amt:,.0f}"
+            if earn_bonus>0 and rsi_bonus>0:
+                return "🟢","집중 매수! 🎯",f"실적급락 +${earn_bonus} + RSI {rv:.0f} 과매도 +${rsi_bonus} 동시 발생!",f"${mu_amt:,.0f}"
+            if earn_bonus>0:
+                return "🟢","실적 기회 매수",f"실적 급락 이벤트 +${earn_bonus} 보너스 (IREN STOP 시 적용)",f"${mu_amt:,.0f}"
+            if rsi_bonus>0:
+                return "🟢","과매도 추가 매수",f"RSI {rv:.0f} 과매도 +${rsi_bonus} (IREN STOP 시 적용)",f"${mu_amt:,.0f}"
+            return "🟢","정기 매수",f"RSI {rv:.0f} — 매달 $200 정기 집행",f"${mu_amt:,.0f}"
 
         return "🟡","관망","—","—"
 
@@ -690,7 +774,7 @@ with ta0:
     st.markdown("<br>",unsafe_allow_html=True)
 
     # ── 종목별 결정 카드
-    priority_order=["IREN","GOOGL","MU","NXE","IONQ"]  # 수익 기여도 순
+    priority_order=["IREN","GOOGL","MU"]  # 수익 기여도 순
     for t in priority_order:
         info=TICKERS[t]; em,lb,rs,ac=decisions[t]
         ind=inds.get(t,{}); rv=ind.get("rsi",0); pc=ind.get("price_chg",0)
@@ -765,7 +849,7 @@ with ta0:
     st.markdown('''<div class="card" style="margin-top:.8rem"><div class="st2">📌 월별 운용 규칙</div>
 <table><tr><th>단계</th><th>행동</th><th>비고</th></tr>
 <tr><td>1</td><td>GOOGL $600 선매수</td><td>매달 고정</td></tr>
-<tr><td>2~5</td><td>IREN→MU→NXE→IONQ 신호순</td><td>우선순위 예산 배분</td></tr>
+<tr><td>2~3</td><td>IREN→MU 신호순</td><td>우선순위 예산 배분</td></tr>
 <tr><td>6</td><td>잔액 → GOOGL 추가</td><td>100% 집행 원칙</td></tr>
 </table></div>''',unsafe_allow_html=True)
 
@@ -1121,8 +1205,8 @@ with ta3:
                 # 재배분 제안 (크게)
                 st.markdown("---")
                 st.markdown('<div class="st2">💡 매도 후 재배분 제안</div>',unsafe_allow_html=True)
-                st.markdown('<div class="info">Rule 1 기준: IREN 초과분 → GOOGL 50% / MU 30% / NXE 20%로 재투자</div>',unsafe_allow_html=True)
-                for rt,rw_r in [("GOOGL",0.50),("MU",0.30),("NXE",0.20)]:
+                st.markdown('<div class="info">Rule 1 기준: IREN 초과분 → GOOGL 50% / MU 50%로 재투자</div>',unsafe_allow_html=True)
+                for rt,rw_r in [("GOOGL",0.50),("MU",0.50)]:
                     ri_amt=net_sell*rw_r  # 세후 실수령액 기준
                     ri_px=prices.get(rt,0); ri_sh=ri_amt/ri_px if ri_px>0 else 0
                     ri_col=TICKERS[rt]["color"]
@@ -1241,10 +1325,10 @@ with ta3:
 <tr><td>매수 우선</td><td>비중 조정은 부족한 종목 매수로 먼저 해결</td></tr>
 <tr><td>매도 최소화</td><td>매수 후에도 5%↑ 초과 시에만 최소 매도</td></tr>
 <tr><td>세금 고려</td><td>1년 이상 보유 → 장기 양도세(15%) 적용</td></tr>
-<tr><td>Rule 1</td><td>IREN >50% → GOOGL 50%/MU 30%/NXE 20%</td></tr>
+<tr><td>Rule 1</td><td>IREN >50% → GOOGL 50%/MU 50%</td></tr>
 <tr><td>Rule 2</td><td>GOOGL >40% → IREN 로테이션</td></tr>
-<tr><td>Rule 3</td><td>NXE 3개월 음봉 → 비중 +5%</td></tr>
-<tr><td>Rule 4</td><td>IONQ >10% → GOOGL 이동</td></tr>
+
+
 </table></div>""",unsafe_allow_html=True)
 
 with ta4:
@@ -1275,16 +1359,3 @@ with ta4:
         hit="✅ 달성" if fv>=TARGET else f"❌ {fv/TARGET*100:.0f}%"
         with col: st.markdown(f'<div class="mb"><div class="ml">{lb}</div><div class="mv" style="color:{fc}">${fv:,.0f}</div><div class="ms">36개월 | {hit}</div></div>',unsafe_allow_html=True)
     st.markdown("---")
-    st.markdown('<div class="st2">☢ NXE 3개월 연속 음봉 모니터 (Rule 3)</div>',unsafe_allow_html=True)
-    ndf=mdata.get("NXE",pd.DataFrame())
-    if not ndf.empty and len(ndf)>=60:
-        mr=ndf["Close"].resample("ME").last().pct_change().dropna().tail(4)
-        neg=0
-        for r in mr.values:
-            if r<0: neg+=1
-            else: neg=0
-        sc2="#e05c5c" if neg>=3 else "#c9a84c" if neg>=2 else "#6b7a99"
-        mg2="🔥 <b>바닥 시그널!</b> NXE 3개월 연속 음봉 — 비중 +5% 검토" if neg>=3 else f"NXE 연속 음봉: <b style='color:{sc2}'>{neg}개월</b> (3개월 시 비중 +5%)"
-        bx2="warn" if neg>=3 else "card"
-        st.markdown(f'<div class="{bx2}">{mg2}</div>',unsafe_allow_html=True)
-    else: st.markdown('<div class="info">NXE 데이터 로딩 중...</div>',unsafe_allow_html=True)
