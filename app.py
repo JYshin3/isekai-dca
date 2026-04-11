@@ -250,6 +250,41 @@ def load_pf():
 def save_pf(p):
     with open(PF_FILE,"w") as f: json.dump(p,f,indent=2,default=str)
 
+def calc_portfolio_from_trades(trades, prices):
+    """
+    매매일지에서 보유 주수/평균단가/총투자금 자동 계산 (FIFO)
+    returns: holdings dict, total_invested, start_date
+    """
+    holdings = {t: {"shares":0.0,"avg_cost":0.0,"total_cost":0.0} for t in TICKERS}
+    start_date = None
+
+    for tr in sorted(trades, key=lambda x:x["date"]):
+        t = tr["ticker"]
+        if t not in holdings: continue
+        if start_date is None: start_date = tr["date"]
+
+        if tr["action"] == "BUY":
+            prev_shares = holdings[t]["shares"]
+            prev_cost   = holdings[t]["total_cost"]
+            new_shares  = prev_shares + tr["shares"]
+            new_cost    = prev_cost + tr["shares"] * tr["price"]
+            holdings[t]["shares"]     = new_shares
+            holdings[t]["total_cost"] = new_cost
+            holdings[t]["avg_cost"]   = new_cost / new_shares if new_shares > 0 else 0
+
+        elif tr["action"] == "SELL":
+            sell_sh = min(tr["shares"], holdings[t]["shares"])
+            if holdings[t]["shares"] > 0:
+                # 평단가 유지 (FIFO에서 avg_cost는 남은 주식 기준)
+                cost_per_sh = holdings[t]["avg_cost"]
+                holdings[t]["shares"]     -= sell_sh
+                holdings[t]["total_cost"] -= sell_sh * cost_per_sh
+                if holdings[t]["shares"] <= 0:
+                    holdings[t] = {"shares":0.0,"avg_cost":0.0,"total_cost":0.0}
+
+    total_invested = sum(h["total_cost"] for h in holdings.values())
+    return holdings, total_invested, start_date
+
 @st.cache_data(ttl=300)
 def fetch(t,period="1y"):
     try:
@@ -494,33 +529,27 @@ with st.sidebar:
     pf["earn_mu"]=earn_mu
     st.markdown("---")
     st.markdown('<div class="st2">📁 포트폴리오</div>',unsafe_allow_html=True)
-    with st.expander("보유 주식 입력"):
+    # 매매일지에서 자동 계산
+    trades=pf.get("trades",[])
+    if trades:
+        calc_h, calc_inv, calc_start = calc_portfolio_from_trades(trades, prices)
+        pf["holdings"] = calc_h
+        pf["total_invested"] = calc_inv
+        if calc_start: pf["start_date"] = calc_start
+        # 현황 요약
+        pv_side = sum(calc_h[t]["shares"]*prices.get(t,0) for t in TICKERS)
+        pnl_side = pv_side - calc_inv
+        pc_side = "#3ecf8e" if pnl_side>=0 else "#e05c5c"
+        st.markdown(f'<div style="font-size:.72rem;color:#3ecf8e;margin-bottom:.3rem">🤖 매매일지 {len(trades)}건에서 자동 계산됨</div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="mb" style="margin-bottom:.3rem"><div class="ml">포트 가치</div><div style="font-size:1.1rem;color:#c9a84c;font-family:Cinzel,serif">${pv_side:,.0f}</div><div class="ms" style="color:{pc_side}">손익 ${pnl_side:+,.0f}</div></div>',unsafe_allow_html=True)
         for t in TICKERS:
-            h=pf["holdings"][t]
-            px_now=prices.get(t,0)
-            st.markdown(f'<div style="font-size:.75rem;color:#c9a84c;margin-top:.7rem;font-family:Cinzel,serif;border-bottom:1px solid #1e2a3a;padding-bottom:2px">{t} · 현재가 ${px_now:,.2f}</div>',unsafe_allow_html=True)
-            c1,c2=st.columns(2)
-            with c1:
-                h["shares"]=st.number_input(
-                    "보유 주수",0.,
-                    value=round(float(h["shares"]),2),
-                    step=0.01,format="%.2f",
-                    key=f"sh{t}")
-            with c2:
-                h["avg_cost"]=st.number_input(
-                    "평균단가 ($)",0.,
-                    value=float(h["avg_cost"]) if h["avg_cost"]>0 else float(px_now),
-                    step=0.01,format="%.2f",
-                    key=f"a{t}")
-            # 미리보기
-            cur_val=h["shares"]*px_now
-            pnl_pct=(px_now-h["avg_cost"])/h["avg_cost"]*100 if h["avg_cost"]>0 else 0.
-            col_c="#3ecf8e" if pnl_pct>=0 else "#e05c5c"
+            h=calc_h[t]; px_n=prices.get(t,0); val=h["shares"]*px_n
             if h["shares"]>0:
-                st.markdown(f'<div style="font-size:.65rem;color:{col_c};margin-bottom:.2rem">평가액 ${cur_val:,.0f} ({pnl_pct:+.1f}%)</div>',unsafe_allow_html=True)
-        pf["total_invested"]=sum(h["shares"]*h["avg_cost"] for h in pf["holdings"].values())
-        pf["start_date"]=st.text_input("시작일 (YYYY-MM-DD)",pf.get("start_date",datetime.now().strftime("%Y-%m-%d")))
-    if st.button("💾 저장"): save_pf(pf); st.success("저장됨!")
+                pp=(px_n-h["avg_cost"])/h["avg_cost"]*100 if h["avg_cost"]>0 else 0
+                pc2="#3ecf8e" if pp>=0 else "#e05c5c"
+                st.markdown(f'<div style="font-size:.68rem;display:flex;justify-content:space-between;padding:.2rem 0;border-bottom:1px solid #1e2a3a"><span style="color:{TICKERS[t]["color"]}">{t}</span><span style="color:#e8e6f0">{h["shares"]:.2f}주</span><span style="color:{pc2}">{pp:+.1f}%</span></div>',unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="font-size:.7rem;color:#e08c3c">⚠️ 매매일지에 거래 기록 없음<br>📋 매매일지 탭에서 입력하세요</div>',unsafe_allow_html=True)
     if st.button("🔄 새로고침"): st.cache_data.clear(); st.rerun()
     st.markdown(f'<div style="color:#6b7a99;font-size:.65rem;margin-top:1rem">{datetime.now().strftime("%Y-%m-%d %H:%M")} UTC</div>',unsafe_allow_html=True)
 
@@ -532,6 +561,14 @@ sigs={
     "MU":   sg_mu(inds.get("MU",{}),earn_mu),
 }
 alloc=allocate(sigs)
+
+# ── 매매일지 기반 포트폴리오 자동 계산
+trades_all = pf.get("trades",[])
+if trades_all:
+    calc_h2, calc_inv2, calc_start2 = calc_portfolio_from_trades(trades_all, prices)
+    pf["holdings"] = calc_h2
+    pf["total_invested"] = calc_inv2
+    if calc_start2: pf["start_date"] = calc_start2
 
 hl=pf["holdings"]
 pv=sum(hl[t]["shares"]*prices.get(t,0) for t in TICKERS)
