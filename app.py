@@ -542,7 +542,7 @@ elapsed=max((datetime.now()-start).days/30,.1); remaining=max(MONTHS-elapsed,0)
 pvt={t:hl[t]["shares"]*prices.get(t,0) for t in TICKERS}
 cw={t:v/pv if pv>0 else 0 for t,v in pvt.items()}
 
-ta0,ta1,ta2,ta3=st.tabs(["🎯 오늘 살까?","📊 종목 분석","⚖ 리밸런싱","🏆 목표 추적"])
+ta0,ta1,ta2,ta3,ta4=st.tabs(["🎯 오늘 살까?","📋 매매일지","📊 종목 분석","⚖ 리밸런싱","🏆 목표 추적"])
 
 with ta0:
     st.markdown('<div class="st2">🎯 오늘의 매수 결정</div>',unsafe_allow_html=True)
@@ -660,38 +660,38 @@ with ta0:
         px=prices.get(t,0)
 
         if em=="🟢":
-            bg="#0a2a0a"; border="#3ecf8e"; tc="#3ecf8e"
+            bg="#061a06"; border="#3ecf8e"; tc="#3ecf8e"; border_w="3px"
         elif em=="🔴":
-            bg="#2a0a0a"; border="#e05c5c"; tc="#e05c5c"
+            bg="#1a0606"; border="#e05c5c"; tc="#e05c5c"; border_w="3px"
         else:
-            bg="#1a1a0a"; border="#c9a84c"; tc="#c9a84c"
+            bg="#141406"; border="#c9a84c"; tc="#c9a84c"; border_w="2px"
 
         pc_c="#3ecf8e" if pc>=0 else "#e05c5c"
         pc_s="▲" if pc>=0 else "▼"
         rsi_c="#e05c5c" if rv>65 else "#e08c3c" if rv>50 else "#3ecf8e" if rv<35 else "#4fa3e0"
 
-        st.markdown(f'''<div style="background:{bg};border:1px solid {border};border-radius:8px;padding:1rem;margin-bottom:.6rem">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        # 매수금액 파싱
+        is_buy = em=="🟢" and "$" in ac
+        ac_display = ac if ac not in ["—","매수 금지"] else ("⛔ 매수 금지" if ac=="매수 금지" else "— 관망")
+
+        st.markdown(f'''<div style="background:{bg};border-left:{border_w} solid {border};border:1px solid {border}44;border-left:{border_w} solid {border};border-radius:10px;padding:1.2rem 1.1rem;margin-bottom:.8rem">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
     <div>
-      <span style="font-family:Cinzel,serif;font-size:1rem;color:#e8e6f0">{t}</span>
-      <span style="font-size:.65rem;color:#6b7a99;margin-left:.5rem">{info["name"]}</span>
+      <span style="font-family:Cinzel,serif;font-size:1.3rem;color:#e8e6f0">{t}</span>
+      <span style="font-size:.7rem;color:#6b7a99;margin-left:.5rem">{info["name"]}</span>
     </div>
     <div style="text-align:right">
-      <span style="font-size:.7rem;color:{info["color"]}">${px:,.2f}</span>
-      <span style="font-size:.65rem;color:{pc_c};margin-left:.3rem">{pc_s}{abs(pc):.1f}%</span>
+      <div style="font-size:1rem;color:{info["color"]};font-family:Cinzel,serif">${px:,.2f}</div>
+      <div style="font-size:.75rem;color:{pc_c}">{pc_s} {abs(pc):.1f}%</div>
     </div>
   </div>
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <div>
-      <span style="font-size:1.1rem">{em}</span>
-      <span style="font-size:.9rem;color:{tc};font-weight:600;margin-left:.3rem">{lb}</span>
-    </div>
-    <div style="text-align:right">
-      <span style="background:#0f1620;color:{tc};border:1px solid {border};padding:2px 10px;border-radius:4px;font-size:.75rem;font-family:Cinzel,serif">{ac}</span>
-    </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.7rem">
+    <div style="font-size:1.5rem;color:{tc};font-weight:700">{em} {lb}</div>
+    <div style="background:{border}22;color:{tc};border:1.5px solid {border};padding:.3rem .9rem;border-radius:6px;font-family:Cinzel,serif;font-size:1.1rem;font-weight:700">{ac_display}</div>
   </div>
-  <div style="margin-top:.5rem;font-size:.7rem;color:#9ba8bb;border-top:1px solid {border}33;padding-top:.4rem">
-    💬 {rs} &nbsp;·&nbsp; RSI <span style="color:{rsi_c}">{rv:.0f}</span>
+  <div style="background:#0f1620;border-radius:6px;padding:.5rem .7rem;font-size:.8rem;color:#9ba8bb;line-height:1.6">
+    💬 {rs}<br>
+    <span style="color:#6b7a99">RSI </span><span style="color:{rsi_c};font-size:.9rem;font-weight:600">{rv:.0f}</span>
   </div>
 </div>''',unsafe_allow_html=True)
 
@@ -734,7 +734,7 @@ with ta0:
 
 
 
-with ta1:
+with ta2:
     sel=st.selectbox("종목 선택",list(TICKERS.keys()),format_func=lambda x:f"{x} — {TICKERS[x]['name']}")
     df=mdata.get(sel,pd.DataFrame()); ind=inds.get(sel,{}); p=IND_P[sel]
     if not df.empty and ind:
@@ -774,8 +774,172 @@ with ta1:
         })
     st.dataframe(pd.DataFrame(param_rows),use_container_width=True,hide_index=True)
 
+# ── TAB 1: 매매일지 ──
+with ta1:
+    st.markdown('<div class="st2">📋 매매일지</div>',unsafe_allow_html=True)
+
+    # 거래내역 저장 구조: pf["trades"] = [{date, ticker, action, shares, price}, ...]
+    if "trades" not in pf:
+        pf["trades"] = []
+
+    # ── 거래 입력 폼
+    st.markdown('<div class="st2">➕ 거래 기록 입력</div>',unsafe_allow_html=True)
+    with st.form("trade_form", clear_on_submit=True):
+        fc1,fc2,fc3=st.columns(3)
+        with fc1:
+            trade_date=st.date_input("거래일", value=datetime.now().date(), key="td_date")
+            trade_ticker=st.selectbox("종목", list(TICKERS.keys()), key="td_ticker")
+        with fc2:
+            trade_action=st.selectbox("구분", ["BUY","SELL"], key="td_action")
+            trade_shares=st.number_input("주수", min_value=0.0001, value=1.0, step=0.01, format="%.4f", key="td_shares")
+        with fc3:
+            trade_price=st.number_input("단가 ($)", min_value=0.01, value=float(prices.get("IREN",30)), step=0.01, format="%.2f", key="td_price")
+            trade_memo=st.text_input("메모 (선택)", key="td_memo", placeholder="DCA, 불타기 등")
+        submitted=st.form_submit_button("✅ 거래 추가", use_container_width=True)
+        if submitted:
+            pf["trades"].append({
+                "date": str(trade_date),
+                "ticker": trade_ticker,
+                "action": trade_action,
+                "shares": float(trade_shares),
+                "price": float(trade_price),
+                "memo": trade_memo,
+                "total": float(trade_shares)*float(trade_price),
+            })
+            save_pf(pf)
+            st.success(f"✅ {trade_ticker} {trade_action} {trade_shares:.4f}주 @ ${trade_price:.2f} 추가됨!")
+            st.rerun()
+
+    st.markdown("---")
+
+    if pf["trades"]:
+        trades=pf["trades"]
+
+        # ── 거래내역 테이블
+        st.markdown('<div class="st2">📊 전체 거래내역</div>',unsafe_allow_html=True)
+
+        # 필터
+        fl1,fl2=st.columns(2)
+        with fl1: filter_t=st.selectbox("종목 필터",["전체"]+list(TICKERS.keys()),key="fl_t")
+        with fl2: filter_a=st.selectbox("구분 필터",["전체","BUY","SELL"],key="fl_a")
+
+        filtered=[t for t in trades
+                  if (filter_t=="전체" or t["ticker"]==filter_t)
+                  and (filter_a=="전체" or t["action"]==filter_a)]
+        filtered_sorted=sorted(filtered,key=lambda x:x["date"],reverse=True)
+
+        if filtered_sorted:
+            df_trades=pd.DataFrame(filtered_sorted)
+            df_trades["수익/비용"]=df_trades.apply(
+                lambda r: f"-${r['total']:,.0f}" if r["action"]=="BUY" else f"+${r['total']:,.0f}", axis=1)
+            df_trades["구분색"]=df_trades["action"].map({"BUY":"매수","SELL":"매도"})
+            display_cols={"date":"날짜","ticker":"종목","구분색":"구분",
+                          "shares":"주수","price":"단가","수익/비용":"금액","memo":"메모"}
+            df_show=df_trades[list(display_cols.keys())].rename(columns=display_cols)
+            df_show["주수"]=df_show["주수"].apply(lambda x: f"{x:.4f}" if isinstance(x,float) else x)
+            df_show["단가"]=df_show["단가"].apply(lambda x: f"${x:,.2f}" if isinstance(x,float) else x)
+            st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+            # 삭제
+            with st.expander("🗑 거래 삭제"):
+                del_idx=st.number_input("삭제할 행 번호 (최신순 1번부터)",1,len(filtered_sorted),1,key="del_idx")
+                if st.button("삭제 확인",key="del_btn"):
+                    target=filtered_sorted[del_idx-1]
+                    pf["trades"].remove(target)
+                    save_pf(pf)
+                    st.success("삭제됨"); st.rerun()
+        else:
+            st.info("해당 조건의 거래내역이 없습니다.")
+
+        st.markdown("---")
+
+        # ── FIFO 분석 (종목별 보유 배치 계산)
+        st.markdown('<div class="st2">🧮 FIFO 보유 현황 & 세금 분석</div>',unsafe_allow_html=True)
+        st.markdown('<div class="info">💡 FIFO(선입선출): 먼저 산 주식부터 먼저 파는 방식. 1년 이상 보유분 우선 매도 시 세금 최소화.</div>',unsafe_allow_html=True)
+
+        sel_tax_t=st.selectbox("종목 선택",list(TICKERS.keys()),key="tax_ticker")
+
+        # FIFO 배치 계산
+        buy_lots=[]  # [(date, shares, price), ...]
+        for tr in sorted(trades,key=lambda x:x["date"]):
+            if tr["ticker"]!=sel_tax_t: continue
+            if tr["action"]=="BUY":
+                buy_lots.append({"date":tr["date"],"shares":tr["shares"],"price":tr["price"],"remaining":tr["shares"]})
+            elif tr["action"]=="SELL":
+                sell_rem=tr["shares"]
+                for lot in buy_lots:
+                    if sell_rem<=0: break
+                    if lot["remaining"]>0:
+                        used=min(lot["remaining"],sell_rem)
+                        lot["remaining"]-=used; sell_rem-=used
+
+        active_lots=[l for l in buy_lots if l["remaining"]>0.0001]
+        today_str=datetime.now().strftime("%Y-%m-%d")
+
+        if active_lots:
+            lot_rows=[]
+            total_value_fifo=0
+            for lot in active_lots:
+                days_held=(datetime.now()-datetime.strptime(lot["date"],"%Y-%m-%d")).days
+                is_long=days_held>=365
+                px_now=prices.get(sel_tax_t,0)
+                cur_val=lot["remaining"]*px_now
+                cost=lot["remaining"]*lot["price"]
+                gain=cur_val-cost
+                tax_rate=0.15 if is_long else 0.37
+                tax_if_sold=max(gain*tax_rate,0)
+                total_value_fifo+=cur_val
+                lot_rows.append({
+                    "매수일":lot["date"],
+                    "주수":f"{lot['remaining']:.4f}",
+                    "매수단가":f"${lot['price']:,.2f}",
+                    "현재가":f"${px_now:,.2f}",
+                    "평가액":f"${cur_val:,.0f}",
+                    "수익":f"${gain:+,.0f}",
+                    "보유일":f"{days_held}일",
+                    "세율":"장기 15%" if is_long else "단기 37%",
+                    "매도시 세금":f"~${tax_if_sold:,.0f}",
+                })
+            st.dataframe(pd.DataFrame(lot_rows),use_container_width=True,hide_index=True)
+
+            # 매도 시나리오: 얼마 팔 때 세금 얼마?
+            st.markdown('<div class="st2">💰 매도 시나리오 계산</div>',unsafe_allow_html=True)
+            sell_amt_fifo=st.number_input(f"{sel_tax_t} 매도할 금액 ($)",0.,float(total_value_fifo),
+                value=min(1000.,float(total_value_fifo)),step=100.,key="sell_amt_fifo")
+
+            if sell_amt_fifo>0:
+                px_now=prices.get(sel_tax_t,0)
+                sell_sh=sell_amt_fifo/px_now if px_now>0 else 0
+                # FIFO로 세금 계산
+                rem=sell_sh; tax_total=0; gain_total=0; detail=[]
+                for lot in active_lots:
+                    if rem<=0.0001: break
+                    used=min(lot["remaining"],rem)
+                    days_held=(datetime.now()-datetime.strptime(lot["date"],"%Y-%m-%d")).days
+                    is_long=days_held>=365
+                    gain=(px_now-lot["price"])*used
+                    tax=max(gain*(0.15 if is_long else 0.37),0)
+                    tax_total+=tax; gain_total+=gain; rem-=used
+                    detail.append({"date":lot["date"],"used":used,"gain":gain,"tax":tax,"long":is_long})
+
+                rc1,rc2,rc3=st.columns(3)
+                net=sell_amt_fifo-tax_total
+                with rc1: st.markdown(f'<div class="mb" style="border-color:#e05c5c"><div class="ml">매도금액</div><div class="mv" style="color:#e05c5c;font-size:1.3rem">${sell_amt_fifo:,.0f}</div></div>',unsafe_allow_html=True)
+                with rc2: st.markdown(f'<div class="mb" style="border-color:#e08c3c"><div class="ml">예상 세금 (FIFO)</div><div class="mv" style="color:#e08c3c;font-size:1.3rem">${tax_total:,.0f}</div><div class="ms">수익 ${gain_total:+,.0f}</div></div>',unsafe_allow_html=True)
+                with rc3: st.markdown(f'<div class="mb" style="border-color:#3ecf8e"><div class="ml">실수령액</div><div class="mv" style="color:#3ecf8e;font-size:1.3rem">${net:,.0f}</div></div>',unsafe_allow_html=True)
+
+                for d in detail:
+                    tc="#3ecf8e" if d["long"] else "#e05c5c"
+                    tl="장기 15%" if d["long"] else "단기 37%"
+                    st.markdown(f'<div style="font-size:.72rem;padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-bottom:.2rem;display:flex;justify-content:space-between"><span style="color:#6b7a99">{d["date"]} · {d["used"]:.4f}주</span><span style="color:{tc}">{tl} · 수익 ${d["gain"]:+,.0f} → 세금 ${d["tax"]:,.0f}</span></div>',unsafe_allow_html=True)
+        else:
+            st.info(f"{sel_tax_t} 매수 기록이 없습니다. 거래를 먼저 입력해주세요.")
+    else:
+        st.markdown('<div class="info">📌 거래를 입력하면 FIFO 세금 분석이 활성화됩니다.</div>',unsafe_allow_html=True)
+
+
 # ── TAB 2: 리밸런싱 ──
-with ta2:
+with ta3:
     st.markdown('<div class="st2">⚖ 분기별 리밸런싱</div>',unsafe_allow_html=True)
     if pv>0:
         c1,c2=st.columns(2)
@@ -813,96 +977,125 @@ with ta2:
                 st.session_state["show_sell"] = True
                 st.session_state["show_rebal"] = False
 
-        # ── 매도 플랜
+        # ── 매도 플랜 (FIFO 기반)
         if st.session_state.get("show_sell", False):
             st.markdown("---")
-            st.markdown('<div class="st2">🔴 매도 플랜 — 세금 최소화</div>',unsafe_allow_html=True)
-            st.markdown('<div class="warn">⚠️ 매도는 세금이 발생합니다. 세금 적은 순서로 정렬했습니다.</div>',unsafe_allow_html=True)
-            st.markdown('<div style="font-size:.7rem;color:#6b7a99;margin:.5rem 0">📌 보유기간: 1년 미만 단기(37%) / 1년 이상 장기(15%)</div>',unsafe_allow_html=True)
+            st.markdown('<div class="st2">🔴 매도 플랜 — FIFO 세금 최소화</div>',unsafe_allow_html=True)
 
-            hold_periods = {}
-            cols_hp = st.columns(5)
-            for i_hp,t_hp in enumerate(TICKERS):
-                with cols_hp[i_hp]:
-                    hold_periods[t_hp] = st.selectbox(t_hp, ["장기(15%)","단기(37%)"], key="hp_"+t_hp)
+            has_trades = bool(pf.get("trades",[]))
+            if not has_trades:
+                st.markdown('<div class="warn">⚠️ 매매일지에 거래 기록이 없습니다. 📋 매매일지 탭에서 먼저 매수 기록을 입력하면 FIFO로 정확한 세금 계산이 가능합니다.</div>',unsafe_allow_html=True)
+                st.markdown('<div style="font-size:.75rem;color:#6b7a99;margin-top:.5rem">매매일지 없이도 아래 수동 추정으로 진행할 수 있습니다.</div>',unsafe_allow_html=True)
 
-            surplus_items = []
+            st.markdown('<div class="info">📌 FIFO 원칙: 먼저 산 주식부터 먼저 매도. 1년 이상 보유분은 장기세율(15%) 적용.</div>',unsafe_allow_html=True)
+
+            surplus_items=[]
             for t_s,info_s in TICKERS.items():
-                cur_s = cw.get(t_s,0)
-                tgt_s = info_s["weight"]
-                if cur_s - tgt_s > 0.01:
-                    surplus_val = (cur_s - tgt_s) * pv
-                    px_s = prices.get(t_s,0)
-                    avg_s = pf["holdings"][t_s].get("avg_cost",0)
-                    sh_s = surplus_val / px_s if px_s > 0 else 0
-                    gain_s = max((px_s - avg_s) * sh_s, 0) if avg_s > 0 else 0
-                    is_long_s = hold_periods[t_s] == "장기(15%)"
-                    rate_s = 0.15 if is_long_s else 0.37
-                    tax_s = gain_s * rate_s
-                    surplus_items.append({
-                        "t":t_s,"info":info_s,
-                        "surplus_val":surplus_val,"sh":sh_s,"px":px_s,
-                        "avg":avg_s,"gain":gain_s,"rate":rate_s,"tax":tax_s,
-                        "is_long":is_long_s,"cur_pct":cur_s*100,"tgt_pct":tgt_s*100,
-                    })
+                cur_s=cw.get(t_s,0); tgt_s=info_s["weight"]
+                if cur_s-tgt_s<=0.01: continue
+                surplus_val=(cur_s-tgt_s)*pv
+                px_s=prices.get(t_s,0)
+                sh_s=surplus_val/px_s if px_s>0 else 0
+
+                # FIFO 세금 계산 (매매일지 있을 때)
+                tax_fifo=0; gain_fifo=0; fifo_detail=[]; fifo_used=True
+                if has_trades:
+                    buy_lots_s=[]
+                    for tr in sorted(pf["trades"],key=lambda x:x["date"]):
+                        if tr["ticker"]!=t_s: continue
+                        if tr["action"]=="BUY":
+                            buy_lots_s.append({"date":tr["date"],"shares":tr["shares"],"price":tr["price"],"remaining":tr["shares"]})
+                        elif tr["action"]=="SELL":
+                            rem_s=tr["shares"]
+                            for lot in buy_lots_s:
+                                if rem_s<=0: break
+                                if lot["remaining"]>0:
+                                    u=min(lot["remaining"],rem_s); lot["remaining"]-=u; rem_s-=u
+                    active_s=[l for l in buy_lots_s if l["remaining"]>0.0001]
+                    rem_sell=sh_s
+                    for lot in active_s:
+                        if rem_sell<=0.0001: break
+                        used=min(lot["remaining"],rem_sell)
+                        days=(datetime.now()-datetime.strptime(lot["date"],"%Y-%m-%d")).days
+                        is_long=days>=365
+                        g=(px_s-lot["price"])*used; t_amt=max(g*(0.15 if is_long else 0.37),0)
+                        tax_fifo+=t_amt; gain_fifo+=g; rem_sell-=used
+                        fifo_detail.append({"date":lot["date"],"used":used,"days":days,"gain":g,"tax":t_amt,"long":is_long})
+                    if not active_s: fifo_used=False
+                else:
+                    fifo_used=False
+
+                if not fifo_used:
+                    # 매매일지 없으면 평단가 기반 추정
+                    avg_s=pf["holdings"][t_s].get("avg_cost",0)
+                    gain_fifo=max((px_s-avg_s)*sh_s,0) if avg_s>0 else 0
+                    tax_fifo=gain_fifo*0.15  # 장기 가정 (보수적)
+                    fifo_detail=[]
+
+                surplus_items.append({
+                    "t":t_s,"info":info_s,"surplus_val":surplus_val,"sh":sh_s,"px":px_s,
+                    "gain":gain_fifo,"tax":tax_fifo,"cur_pct":cur_s*100,"tgt_pct":tgt_s*100,
+                    "fifo_detail":fifo_detail,"fifo_used":fifo_used,
+                })
 
             if surplus_items:
                 surplus_items.sort(key=lambda x:x["tax"])
-                total_sell = sum(x["surplus_val"] for x in surplus_items)
-                total_tax  = sum(x["tax"] for x in surplus_items)
-                net_sell   = total_sell - total_tax
+                total_sell=sum(x["surplus_val"] for x in surplus_items)
+                total_tax=sum(x["tax"] for x in surplus_items)
+                net_sell=total_sell-total_tax
 
-                sc1,sc2,sc3 = st.columns(3)
-                with sc1: st.markdown(f'<div class="mb"><div class="ml">총 매도금액</div><div class="mv" style="color:#e05c5c">${total_sell:,.0f}</div></div>',unsafe_allow_html=True)
-                with sc2: st.markdown(f'<div class="mb"><div class="ml">예상 세금</div><div class="mv" style="color:#e08c3c">${total_tax:,.0f}</div></div>',unsafe_allow_html=True)
-                with sc3: st.markdown(f'<div class="mb"><div class="ml">실수령액</div><div class="mv" style="color:#3ecf8e">${net_sell:,.0f}</div></div>',unsafe_allow_html=True)
+                sc1,sc2,sc3=st.columns(3)
+                with sc1: st.markdown(f'<div class="mb" style="border-color:#e05c5c"><div class="ml">총 매도금액</div><div class="mv" style="color:#e05c5c">${total_sell:,.0f}</div></div>',unsafe_allow_html=True)
+                with sc2: st.markdown(f'<div class="mb" style="border-color:#e08c3c"><div class="ml">예상 세금</div><div class="mv" style="color:#e08c3c">${total_tax:,.0f}</div><div class="ms">{"FIFO 계산" if has_trades else "추정(장기 15%)"}</div></div>',unsafe_allow_html=True)
+                with sc3: st.markdown(f'<div class="mb" style="border-color:#3ecf8e"><div class="ml">실수령액</div><div class="mv" style="color:#3ecf8e">${net_sell:,.0f}</div></div>',unsafe_allow_html=True)
 
                 st.markdown("<br>",unsafe_allow_html=True)
-                st.markdown('<div style="font-size:.72rem;color:#c9a84c;margin-bottom:.5rem">📋 세금 낮은 순서로 매도 권장</div>',unsafe_allow_html=True)
-
                 for rank_s,item_s in enumerate(surplus_items,1):
                     t2=item_s["t"]; info2=item_s["info"]
-                    tc2="#3ecf8e" if item_s["is_long"] else "#e05c5c"
-                    tl2="장기 15%" if item_s["is_long"] else "단기 37%"
                     sv=item_s["surplus_val"]; sh2=item_s["sh"]; px2=item_s["px"]
                     gn=item_s["gain"]; tx=item_s["tax"]
-                    c1p=item_s["cur_pct"]; t1p=item_s["tgt_pct"]; avg2=item_s["avg"]
-                    sv_str  = f"${sv:,.0f}"
-                    sh_str  = f"{sh2:.4f}주"
-                    px_str  = f"${px2:,.2f}"
-                    gn_str  = f"${gn:,.0f}"
-                    tx_str  = f"${tx:,.0f}"
-                    avg_str = f"${avg2:,.2f}"
-                    st.markdown(
-                        f'''<div style="background:#1a0a0a;border:1px solid #e05c5c55;border-left:3px solid #e05c5c;border-radius:6px;padding:.9rem;margin-bottom:.5rem">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+                    c1p=item_s["cur_pct"]; t2p=item_s["tgt_pct"]
+
+                    st.markdown(f'''<div style="background:#1a0a0a;border:1px solid #e05c5c88;border-left:4px solid #e05c5c;border-radius:8px;padding:1.1rem;margin-bottom:.7rem">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.6rem">
     <div>
-      <span style="font-size:.62rem;color:#6b7a99">#{rank_s} 우선 매도</span><br>
-      <span style="font-family:Cinzel,serif;font-size:1rem;color:{info2["color"]}">{t2}</span>
-      <span style="font-size:.62rem;color:{tc2};margin-left:.4rem;background:{tc2}22;padding:1px 5px;border-radius:3px">{tl2}</span>
+      <div style="font-size:.7rem;color:#6b7a99;margin-bottom:.2rem">#{rank_s} 우선 매도 {"· FIFO" if item_s["fifo_used"] else "· 추정"}</div>
+      <div style="font-family:Cinzel,serif;font-size:1.3rem;color:{info2["color"]}">{t2}</div>
+      <div style="font-size:.75rem;color:#9ba8bb;margin-top:.2rem">비중 {c1p:.1f}% → 목표 {t2p:.0f}%</div>
     </div>
     <div style="text-align:right">
-      <div style="font-family:Cinzel,serif;color:#e05c5c;font-size:1.1rem">{sv_str}</div>
-      <div style="font-size:.68rem;color:#6b7a99">{sh_str} @ {px_str}</div>
+      <div style="font-family:Cinzel,serif;color:#e05c5c;font-size:1.6rem">${sv:,.0f}</div>
+      <div style="font-size:.78rem;color:#6b7a99">{sh2:.2f}주 @ ${px2:,.2f}</div>
     </div>
   </div>
-  <div style="display:flex;justify-content:space-between;font-size:.67rem;padding-top:.3rem;border-top:1px solid #e05c5c22;flex-wrap:wrap;gap:.2rem">
-    <span style="color:#9ba8bb">비중 {c1p:.1f}%→{t1p:.0f}%</span>
-    <span style="color:#9ba8bb">평단가 {avg_str} · 수익 {gn_str}</span>
-    <span style="color:{tc2}">세금 ~{tx_str}</span>
-  </div>
-</div>''',unsafe_allow_html=True)
+  <div style="display:flex;justify-content:space-between;background:#2a0a0a;border-radius:4px;padding:.5rem .7rem;font-size:.8rem">
+    <span style="color:#9ba8bb">수익 <b style="color:#e8e6f0">${gn:+,.0f}</b></span>
+    <span style="color:#e08c3c">세금 <b style="color:#e05c5c">${tx:,.0f}</b></span>
+    <span style="color:#3ecf8e">실수령 <b>${sv-tx:,.0f}</b></span>
+  </div>''',unsafe_allow_html=True)
 
+                    if item_s["fifo_detail"]:
+                        with st.expander(f"  {t2} FIFO 상세 내역"):
+                            for d in item_s["fifo_detail"]:
+                                tc="#3ecf8e" if d["long"] else "#e05c5c"
+                                tl="장기(15%)" if d["long"] else "단기(37%)"
+                                st.markdown(f'<div style="font-size:.72rem;padding:.2rem .4rem;background:#0f1620;border-radius:3px;margin-bottom:.2rem;display:flex;justify-content:space-between"><span style="color:#6b7a99">{d["date"]} {d["days"]}일 보유 · {d["used"]:.4f}주</span><span style="color:{tc}">{tl} → 세금 ${d["tax"]:,.0f}</span></div>',unsafe_allow_html=True)
+
+                # 재배분 제안 (크게)
                 st.markdown("---")
-                st.markdown('<div class="info">💡 매도 대금 재배분 제안 (IREN Rule 1 기준)</div>',unsafe_allow_html=True)
+                st.markdown('<div class="st2">💡 매도 후 재배분 제안</div>',unsafe_allow_html=True)
+                st.markdown('<div class="info">Rule 1 기준: IREN 초과분 → GOOGL 50% / MU 30% / NXE 20%로 재투자</div>',unsafe_allow_html=True)
                 for rt,rw_r in [("GOOGL",0.50),("MU",0.30),("NXE",0.20)]:
-                    ri_amt = total_sell * rw_r
-                    ri_px  = prices.get(rt,0)
-                    ri_sh  = ri_amt/ri_px if ri_px>0 else 0
-                    ri_col = TICKERS[rt]["color"]
-                    ri_str = f"${ri_amt:,.0f}"
-                    ri_shstr = f"{ri_sh:.4f}주"
-                    st.markdown(f'<div style="font-size:.75rem;padding:.3rem 0;border-bottom:1px solid #1e2a3a">→ <span style="color:{ri_col};font-family:Cinzel,serif">{rt}</span> {rw_r*100:.0f}% · <b>{ri_str}</b> ({ri_shstr})</div>',unsafe_allow_html=True)
+                    ri_amt=net_sell*rw_r  # 세후 실수령액 기준
+                    ri_px=prices.get(rt,0); ri_sh=ri_amt/ri_px if ri_px>0 else 0
+                    ri_col=TICKERS[rt]["color"]
+                    st.markdown(f'''<div style="background:#0a1a0a;border:1px solid #3ecf8e44;border-radius:8px;padding:1rem;margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <div style="font-family:Cinzel,serif;font-size:1.2rem;color:{ri_col}">{rt}</div>
+    <div style="font-size:.75rem;color:#6b7a99">{rw_r*100:.0f}% 배분 · {ri_sh:.2f}주 @ ${ri_px:,.2f}</div>
+  </div>
+  <div style="font-family:Cinzel,serif;font-size:1.5rem;color:#3ecf8e">${ri_amt:,.0f}</div>
+</div>''',unsafe_allow_html=True)
             else:
                 st.markdown('<div class="ok">✅ 매도 필요 없음 — 모든 종목 목표 비중 내</div>',unsafe_allow_html=True)
 
@@ -1017,7 +1210,7 @@ with ta2:
 <tr><td>Rule 4</td><td>IONQ >10% → GOOGL 이동</td></tr>
 </table></div>""",unsafe_allow_html=True)
 
-with ta3:
+with ta4:
     st.markdown('<div class="st2">🎯 $500,000 목표 추적</div>',unsafe_allow_html=True)
     c1,c2,c3,c4=st.columns(4)
     with c1: st.markdown(f'<div class="mb card-g"><div class="ml">현재 포트 가치</div><div class="mv">${pv:,.0f}</div><div class="ms">목표 $500,000</div></div>',unsafe_allow_html=True)
