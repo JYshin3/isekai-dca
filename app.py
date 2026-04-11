@@ -177,48 +177,75 @@ def sg_iren(i):
     px=i.get("price",0); e20=i.get("ema20",px); mh=i.get("macd_hist",0)
     mhp=i.get("macd_hist_prev",mh); sk=i.get("stoch_k",50); sd=i.get("stoch_d",50)
     hl=i.get("higher_low",False); pc=i.get("price_chg",0)
-    adv=i.get("adx",20); vs=i.get("vol_spike",1.0); sma80=i.get("sma80",px)
+    adv=i.get("adx",20); vs=i.get("vol_spike",1.0)
+    sma80=i.get("sma80",px); sma200=i.get("sma200",px)
     ax=(at>ata*2) if ata>0 else False
 
-    # ── 추세 매수 조건 (RSI 과열이지만 불장 판단)
+    # ── 장기 추세 판단 (SMA200 기준)
+    above_sma200 = px > sma200  # True = 장기 상승추세 / False = 장기 하락추세
+
+    # ── 불장 추세 조건 (RSI 과열이지만 계속 올라가는 경우)
     trend_conds={
         "ADX>30 (강한추세)": adv>30,
-        "주가>SMA80 (추세위)": px>sma80,
+        "주가>SMA80 (중기추세위)": px>sma80,
         "MACD 상승중": mh>mhp and mh>0,
         "거래량 1.5× ↑": vs>=1.5,
     }
     trend_cnt=sum(trend_conds.values())
     is_trend_bull=(rv>60 and rv<=75 and trend_cnt>=2 and not ax)
 
-    # ── RSI 기반 배율 결정
+    # ── 배율 결정
     if rv>75 or ax:
-        # 완전 과열 or 변동성 폭발 → 무조건 STOP
-        mx,txt=0,"❌ STOP (RSI>75)" if rv>75 else "❌ STOP (변동성 폭발)"
-    elif is_trend_bull:
-        # RSI 60~75 + 추세 조건 2개↑ → 추세 매수 1×
-        mx,txt=1,f"📈 추세 매수 (RSI {rv:.0f}, 불장 {trend_cnt}/4조건)"
-    elif rv<25 and pc<=-10:
-        mx,txt=3,"🔥 3배 매수 (RSI<25+폭락)"
-    elif rv<35:
-        mx,txt=2,"⚡ 2배 매수 (RSI<35)"
-    elif rv<=60:
-        mx,txt=1,"✅ 기본 매수"
-    else:
-        # RSI 60~75 but 추세 조건 미충족 → STOP
-        mx,txt=0,f"⏸ 대기 (RSI {rv:.0f}, 추세조건 {trend_cnt}/4 미충족)"
+        mx=0
+        txt="❌ STOP (RSI>75 완전과열)" if rv>75 else "❌ STOP (변동성 폭발)"
 
-    # ── 불타기: 과매도 구간에서만 (추세매수에는 적용 안함)
+    elif is_trend_bull:
+        mx=1
+        txt=f"📈 추세 매수 (RSI {rv:.0f} 과열이지만 불장 {trend_cnt}/4조건 충족)"
+
+    elif rv<25 and pc<=-10:
+        # 극단적 폭락 — 추세 무관하게 3배 (단, SMA200 아래면 1.5배로 제한)
+        if above_sma200:
+            mx=3
+            txt="🔥 3배 매수 (RSI<25 + 당일 폭락 — 장기추세 위, 공황매수 기회)"
+        else:
+            mx=2  # 추세 하락 중이라 3배 대신 2배
+            txt=f"⚡ 2배 매수 (RSI<25 + 폭락이지만 SMA200 아래 — 추세 하락 중, 3배는 위험)"
+
+    elif rv<35:
+        # 과매도 — SMA200 위아래로 배율 조정
+        if above_sma200:
+            mx=2
+            txt=f"⚡ 2배 매수 (RSI {rv:.0f} 과매도 + SMA200 위 — 눌림목, 적극 매수)"
+        else:
+            mx=1
+            txt=f"✅ 1배 매수 (RSI {rv:.0f} 과매도지만 SMA200 아래 — 추세 하락 중, 섣불리 2배 금지)"
+
+    elif rv<=60:
+        mx=1
+        if above_sma200:
+            txt=f"✅ 기본 매수 (RSI {rv:.0f}, 장기추세 위)"
+        else:
+            txt=f"✅ 기본 매수 (RSI {rv:.0f}, 장기추세 아래 — 하락추세 주의)"
+
+    else:
+        mx=0
+        txt=f"⏸ 대기 (RSI {rv:.0f} 과열, 추세조건 {trend_cnt}/4 미충족)"
+
+    # ── 불타기: 과매도 + SMA200 위일 때만 (하락추세에선 불타기도 금지)
     ign={"MA20 위 회복":px>e20,"MACD 히스토 상승":mh>mhp,"Higher Low":hl,"StochRSI 20→40":sk>40 and sk>sd and sk>20}
     ic=sum(ign.values())
-    if ic>=2 and mx>0 and not is_trend_bull:
+    if ic>=2 and mx>0 and not is_trend_bull and above_sma200:
         mx=min(mx+1,3)
         txt=txt+" 🔥불타기("+str(ic)+"/4)→"+str(mx)+"배"
+    elif ic>=2 and mx>0 and not is_trend_bull and not above_sma200:
+        txt=txt+" (불타기 조건 충족이지만 SMA200 아래 — 배율 유지)"
 
-    # 추세 매수면 1,000 (나머지 예산 전부), 아니면 800*mul
-    amt=1000 if is_trend_bull else min(800*mx, 1000)
+    amt=1000 if is_trend_bull else min(800*mx,1000)
 
     return {"mul":mx,"txt":txt,"amt":amt,"ign":ign,"ic":ic,
-            "is_trend":is_trend_bull,"trend_conds":trend_conds,"trend_cnt":trend_cnt}
+            "is_trend":is_trend_bull,"trend_conds":trend_conds,"trend_cnt":trend_cnt,
+            "above_sma200":above_sma200}
 
 def sg_nxe(i,u):
     if u>82: mx,txt=0,f"❌ 매수 중단 (${u:.0f})"
@@ -702,39 +729,65 @@ with ta0:
             trend_conds=sg.get("trend_conds",{})
             trend_cnt=sg.get("trend_cnt",0)
             ic=sg.get("ic",0)
+            above200=sg.get("above_sma200",True)
+            s200_txt="SMA200 위 ✅" if above200 else "SMA200 아래 ⚠️"
+
             # 완전 STOP
             if rv>75 or (atr>atr_a*2 and atr_a>0):
                 return "🔴","오늘은 패스",f"RSI {rv:.0f}>75 완전 과열 or 변동성 폭발 — 기다려요","매수 금지"
-            # 추세 매수 (불장)
+
+            # 불장 추세 매수
             if is_trend:
-                cond_txt=" · ".join(f"{'✅' if v else '❌'} {k}" for k,v in trend_conds.items())
-                return "🟢","지금 사세요 📈",f"불장 추세 매수! RSI {rv:.0f}, {trend_cnt}/4조건 충족 | {cond_txt}",f"${alloc_amt:,.0f} (추세 1×)"
+                cond_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in trend_conds.items())
+                return "🟢","지금 사세요 📈",f"불장! RSI {rv:.0f} 과열이지만 {trend_cnt}/4조건 | {cond_txt}",f"${alloc_amt:,.0f} (추세 1×)"
+
             # RSI 60~75, 추세 조건 미충족
             if rv>60:
-                cond_txt=" · ".join(f"{'✅' if v else '❌'} {k}" for k,v in trend_conds.items())
+                cond_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in trend_conds.items())
                 return "🟡","대기",f"RSI {rv:.0f} 과열, 추세조건 {trend_cnt}/4 미충족 | {cond_txt}","—"
-            # 3배 구간
+
+            # 극과매도 RSI<25
             if rv<25:
                 reasons=[]
                 if zs<-1.5: reasons.append(f"Z-Score {zs:+.1f}")
                 if mh>mhp:  reasons.append("MACD 반등")
                 if chg1w<-5:reasons.append(f"1주 -{abs(chg1w):.0f}%")
                 r=", ".join(reasons) if reasons else "극과매도"
-                return "🟢","지금 사세요 🔥🔥",f"RSI {rv:.0f} 극과매도 — {r}",f"${alloc_amt:,.0f} ({mul}×)"
-            # 2배 구간
+                if above200:
+                    return "🟢","지금 사세요 🔥🔥",f"RSI {rv:.0f} 극과매도 + {s200_txt} — {r} 공황매수 기회!",f"${alloc_amt:,.0f} ({mul}×)"
+                else:
+                    return "🟢","지금 사세요 ⚡",f"RSI {rv:.0f} 극과매도 but {s200_txt} — 추세 하락 중, 3배→2배 제한. {r}",f"${alloc_amt:,.0f} ({mul}×)"
+
+            # 과매도 RSI<35
             if rv<35:
                 reasons=[]
                 if zs<-1.5: reasons.append(f"Z-Score {zs:+.1f} 저평가")
                 if mh>mhp:  reasons.append("MACD 반등 중")
-                r=", ".join(reasons) if reasons else "과매도"
-                return "🟢","지금 사세요 ⚡",f"RSI {rv:.0f} — {r}",f"${alloc_amt:,.0f} ({mul}×)"
+                r=", ".join(reasons) if reasons else ""
+                if above200:
+                    return "🟢","지금 사세요 ⚡",f"RSI {rv:.0f} 과매도 + {s200_txt} — 눌림목. {r}",f"${alloc_amt:,.0f} ({mul}×)"
+                else:
+                    return "🟢","1배만 사세요",f"RSI {rv:.0f} 과매도지만 {s200_txt} — 추세 하락 중, 섣불리 2배 금지. 저점이 더 올 수 있어요. {r}",f"${alloc_amt:,.0f} (1×)"
+
             # 불타기
             if ic>=2:
-                return "🟢","지금 사세요 🔥",f"불타기 {ic}/4 — 모멘텀 확인",f"${alloc_amt:,.0f} ({mul}×)"
+                if above200:
+                    return "🟢","지금 사세요 🔥",f"불타기 {ic}/4 + {s200_txt} — 모멘텀 확인",f"${alloc_amt:,.0f} ({mul}×)"
+                else:
+                    return "🟡","소량만",f"불타기 {ic}/4 충족이지만 {s200_txt} — 배율 유지, 추세 반전 미확인",f"${alloc_amt:,.0f} ({mul}×)"
+
             # 중립
             if 35<=rv<=50:
-                return "🟡","조금 기다려요",f"RSI {rv:.0f} 중립 — 더 눌리면 더 좋음","$800 (1×)"
-            return "🟡","관망",f"RSI {rv:.0f} 중상단 — 눌림 기다려요","—"
+                if above200:
+                    return "🟡","조금 기다려요",f"RSI {rv:.0f} 중립 + {s200_txt} — 더 눌리면 더 좋음","$800 (1×)"
+                else:
+                    return "🟡","신중하게",f"RSI {rv:.0f} 중립 + {s200_txt} — 하락추세 주의, 기본 매수만","$800 (1×)"
+
+            if above200:
+                return "🟡","관망",f"RSI {rv:.0f} 중상단 + {s200_txt} — 눌림 기다려요","—"
+            else:
+                return "🟡","관망",f"RSI {rv:.0f} + {s200_txt} — 하락추세 중. 추세 전환 확인 후 매수","—"
+
 
         if t=="MU":
             mu_amt=alloc.get("MU",200)
