@@ -959,17 +959,76 @@ with ta0:
 
         # 점수 이유 (펼치기)
         with st.expander(f"  {t} 점수 상세 ({score}/100점)"):
-            for reason in r["reasons"]:
-                # 점수 부호 기준으로 색상 결정 (마지막 +N점/-N점)
-                import re as _re
-                _m=_re.search(r'([+\-])(\d+)점',reason)
-                if _m:
-                    color="#3ecf8e" if _m.group(1)=="+" else "#e05c5c"
-                else:
-                    color="#6b7a99"
-                st.markdown(f'<div style="font-size:.72rem;color:{color};padding:.15rem 0">• {reason}</div>',unsafe_allow_html=True)
-            # 날짜 정보
-            st.markdown(f'<div style="font-size:.68rem;color:#6b7a99;margin-top:.3rem;border-top:1px solid #1e2a3a;padding-top:.3rem">요일: {["월","화","수","목","금","토","일"][weekday]}요일 · 월중 {day_of_month}일 · {"월초(1~7일)" if is_month_start else "월중(10~20일)" if is_mid_month else "기타"}</div>',unsafe_allow_html=True)
+            import re as _re
+            ind_e=inds.get(t,{}); sg_e=sigs[t]
+            pc_e=ind_e.get("price_chg",0); rv_e=ind_e.get("rsi",50)
+            px_e=ind_e.get("price",0); bb_l_e=ind_e.get("bb_lower",0)
+            mh_e=ind_e.get("macd_hist",0); mhp_e=ind_e.get("macd_hist_prev",mh_e)
+            above200_e=sg_e.get("above_sma200",True) if t=="IREN" else None
+
+            # 카테고리별 점수 구조화
+            cats=[
+                ("📉 당일 변동률", "최대 +30점", [
+                    ("오늘 변동률", f"{pc_e:+.1f}%",
+                     30 if pc_e<=-3 else 20 if pc_e<=-1.5 else 10 if pc_e<=-0.5 else -15 if pc_e>=2 else 0,
+                     "최대 +30" if pc_e<=-3 else "+20" if pc_e<=-1.5 else "+10" if pc_e<=-0.5 else "-15 (상승)" if pc_e>=2 else "해당없음 (0점)"),
+                ]),
+                ("📊 RSI 위치", "최대 +25점", [
+                    ("RSI", f"{rv_e:.0f}",
+                     25 if rv_e<30 else 20 if rv_e<40 else 10 if rv_e<50 else -20 if rv_e>70 else -10 if rv_e>60 else 0,
+                     "극과매도 +25" if rv_e<30 else "과매도 +20" if rv_e<40 else "중립하단 +10" if rv_e<50 else "과열 -20" if rv_e>70 else "상단 -10" if rv_e>60 else "중립 (0점)"),
+                ]),
+                ("📈 볼린저밴드", "최대 +20점", [
+                    ("BB 하단 거리",
+                     f"{(px_e-bb_l_e)/px_e*100:.1f}%" if px_e>0 and bb_l_e>0 else "N/A",
+                     20 if px_e>0 and bb_l_e>0 and (px_e-bb_l_e)/px_e*100<1 else
+                     12 if px_e>0 and bb_l_e>0 and (px_e-bb_l_e)/px_e*100<3 else
+                     5  if px_e>0 and bb_l_e>0 and (px_e-bb_l_e)/px_e*100<5 else 0,
+                     "하단 터치 +20" if px_e>0 and bb_l_e>0 and (px_e-bb_l_e)/px_e*100<1 else
+                     "하단 근접 +12" if px_e>0 and bb_l_e>0 and (px_e-bb_l_e)/px_e*100<3 else
+                     "하단 접근 +5" if px_e>0 and bb_l_e>0 and (px_e-bb_l_e)/px_e*100<5 else "해당없음 (0점)"),
+                ]),
+                ("📅 요일·시기", "최대 +25점", [
+                    ("요일", ["월","화","수","목","금","토","일"][weekday]+"요일",
+                     15 if weekday==0 else 10 if weekday==1 else 5 if weekday==4 else 0,
+                     "월요일 +15" if weekday==0 else "화요일 +10" if weekday==1 else "금요일 +5" if weekday==4 else "해당없음 (0점)"),
+                    ("월중 시기", f"{day_of_month}일",
+                     10 if is_mid_month else 5 if is_month_start else 0,
+                     "월중 10~20일 +10" if is_mid_month else "월초 1~7일 +5" if is_month_start else "해당없음 (0점)"),
+                ]),
+                ("⚙ MACD", "최대 +5점", [
+                    ("MACD 방향",
+                     "상승 중" if mh_e>mhp_e and mh_e>0 else "하락 중" if mh_e<mhp_e and mh_e<0 else "중립",
+                     5 if mh_e>mhp_e and mh_e>0 else -5 if mh_e<mhp_e and mh_e<0 else 0,
+                     "모멘텀 상승 +5" if mh_e>mhp_e and mh_e>0 else "모멘텀 하락 -5" if mh_e<mhp_e and mh_e<0 else "해당없음 (0점)"),
+                ]),
+            ]
+            if t=="IREN":
+                cats.append(("⚠️ IREN 전용", "최대 -15점", [
+                    ("SMA200 위치",
+                     "SMA200 위 ✅" if above200_e else "SMA200 아래 ⚠️",
+                     0 if above200_e else -15,
+                     "장기 상승추세 (0점)" if above200_e else "하락추세 -15점"),
+                ]))
+
+            rows_e=[]
+            total_check=0
+            for cat_name,cat_max,items in cats:
+                cat_pts=sum(pts for _,_,pts,_ in items)
+                total_check+=cat_pts
+                for item_name,item_val,pts,comment in items:
+                    pc2="#3ecf8e" if pts>0 else "#e05c5c" if pts<0 else "#6b7a99"
+                    rows_e.append({
+                        "카테고리": cat_name,
+                        "항목": item_name,
+                        "현재값": item_val,
+                        "점수": f"+{pts}" if pts>0 else str(pts),
+                        "판정": comment,
+                    })
+
+            st.dataframe(pd.DataFrame(rows_e),use_container_width=True,hide_index=True)
+            st.markdown(f'<div style="font-size:.75rem;color:#e8e6f0;margin-top:.4rem;font-family:Cinzel,serif">합계: <b>{score}점</b> / 100점</div>',unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:.65rem;color:#6b7a99">{["월","화","수","목","금","토","일"][weekday]}요일 · {day_of_month}일 · {"월초" if is_month_start else "월중" if is_mid_month else "기타"}</div>',unsafe_allow_html=True)
 
         # IREN 전용: SMA200, 불장 조건 표시
         if t=="IREN":
