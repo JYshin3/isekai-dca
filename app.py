@@ -1120,152 +1120,132 @@ with ta0:
         return zones
 
     def draw_price_bar(t, px, zones, ind, mul, sg):
-        """가격 구간 바 시각화 (텍스트 기반)"""
+        """가격 구간 표 — st.dataframe 기반으로 안정적 렌더링"""
         info   = TICKERS[t]
         tc     = info["color"]
         s200   = zones.get("sma200", px)
         bb_low = zones.get("bb_lower", px*0.92)
         rsi35  = zones.get("rsi35", {}).get("avg", px*0.88)
         rsi35_min = zones.get("rsi35", {}).get("min", px*0.85)
-        rsi35_max = zones.get("rsi35", {}).get("max", px*0.92)
+        rsi35_max = zones.get("rsi35", {}).get("max", px*0.93)
         rsi25  = zones.get("rsi25", {}).get("avg", px*0.75)
         rsi25_min = zones.get("rsi25", {}).get("min", px*0.70)
-        watch_max = zones.get("watch", {}).get("max", px*1.05)
         success= zones.get("success_rate")
         entries= zones.get("total_entries", 0)
         cnt35  = zones.get("rsi35", {}).get("count", 0)
         cnt25  = zones.get("rsi25", {}).get("count", 0)
         rv_now = ind.get("rsi", 50)
 
-        # 예산
         if t=="IREN":
-            budget = 1000 if mul>=2 or sg.get("is_trend") else 800
+            budget=1000 if mul>=2 or sg.get("is_trend") else 800
         elif t=="GOOGL":
-            budget = 600
+            budget=600
         else:
-            budget = 200
+            budget=200
 
-        # 구간 정의 (위→아래, 높은가격→낮은가격)
-        all_prices = [px, s200, bb_low, rsi35_max, rsi35, rsi35_min, rsi25, rsi25_min]
-        p_max = max(all_prices) * 1.03
-        p_min = min(all_prices) * 0.97
-        p_range = p_max - p_min if p_max > p_min else 1
+        # 헤더
+        st.markdown(f'<div style="font-family:Cinzel,serif;color:{tc};font-size:1.1rem;margin:1rem 0 .3rem">📊 {t} · 현재가 ${px:,.2f} · RSI {rv_now:.0f}</div>',unsafe_allow_html=True)
 
-        def pct_pos(p):
-            return max(0, min(100, (p - p_min) / p_range * 100))
-
-        # 구간 데이터
-        segments = [
-            ("⚠️ 과열/고평가",  rsi35_max, p_max,    "#e05c5c22", "#e05c5c", "RSI 과열 — 매수 자제"),
-            ("🟡 관망 구간",    rsi35,     rsi35_max, "#c9a84c22", "#c9a84c", f"RSI 35~60 — 기다려요"),
-            ("⚡ 매수 시작",    rsi35_min, rsi35,     "#3ecf8e22", "#3ecf8e", f"RSI 35 이하 과거 평균 (과거 {cnt35}회)"),
-            ("🔥 집중 매수",    rsi25,     rsi35_min, "#3ecf8e44", "#2fff9e", f"RSI 25 이하 과거 평균 (과거 {cnt25}회)"),
-            ("💀 극단 구간",    rsi25_min, rsi25,     "#9b6dff22", "#9b6dff", "역대 최저 근방 — 공황 매수"),
-        ]
-
-        # 주요 가격 라벨
-        markers = []
-        markers.append((px,     "●", "#e8e6f0", f"현재가 ${px:,.2f} (RSI {rv_now:.0f})"))
-        markers.append((s200,   "▶", "#9b6dff", f"SMA200 ${s200:,.2f} (장기지지선)"))
-        markers.append((bb_low, "▶", "#4fa3e0", f"BB하단 ${bb_low:,.2f} (볼린저밴드 하단)"))
-        if cnt35>0:
-            markers.append((rsi35, "▶", "#3ecf8e", f"RSI35 평균 ${rsi35:,.2f} (과거 {cnt35}회 평균)"))
-        if cnt25>0:
-            markers.append((rsi25, "▶", "#2fff9e", f"RSI25 평균 ${rsi25:,.2f} (과거 {cnt25}회 평균)"))
-
-        # ── 렌더링
-        st.markdown(f'<div style="font-family:Cinzel,serif;color:{tc};font-size:1.1rem;margin:1rem 0 .5rem">📊 {t} · 현재가 ${px:,.2f}</div>',unsafe_allow_html=True)
-
-        # 성공률 표시
+        # 반등 성공률
         if success is not None and entries>0:
             sc="#3ecf8e" if success>=70 else "#c9a84c" if success>=50 else "#e05c5c"
-            st.markdown(f'<div style="font-size:.72rem;color:{sc};margin-bottom:.5rem">📈 과거 RSI35 이하 진입 후 1개월 +10% 달성률: <b>{success:.0f}%</b> ({entries}번 중 {int(entries*success/100)}번 성공)</div>',unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:.72rem;color:{sc};margin-bottom:.4rem">📈 RSI35 이하 진입 후 1개월 +10% 성공률: {success:.0f}% ({entries}번 중 {int(entries*success/100)}번)</div>',unsafe_allow_html=True)
 
-        # 가격 구간 바 (HTML 테이블 기반)
-        rows_html = ""
-        bar_width = 160  # px
+        # ── 가격 구간 표 (st.dataframe 사용)
+        # 주요 가격 레벨 수집
+        levels = []
+        levels.append({"가격": px,       "구분": f"● 현재가",         "설명": f"RSI {rv_now:.0f}",               "현재": "◀ 지금"})
+        if abs(s200-px)/px > 0.005:
+            levels.append({"가격": s200,  "구분": "▷ SMA200",          "설명": "장기 지지선",                    "현재": ""})
+        if abs(bb_low-px)/px > 0.005:
+            levels.append({"가격": bb_low,"구분": "▷ BB 하단",          "설명": "볼린저밴드 하단 — 통계적 저점",    "현재": ""})
+        if cnt35>0:
+            levels.append({"가격": rsi35_max,"구분": "─ 관망 상단",     "설명": f"RSI35 과거 최고가 (과거 {cnt35}회)", "현재": ""})
+            levels.append({"가격": rsi35,    "구분": "⚡ 매수 시작",    "설명": f"RSI35 과거 평균 (과거 {cnt35}회)", "현재": ""})
+            levels.append({"가격": rsi35_min,"구분": "⚡ 강한 지지",    "설명": "RSI35 과거 최저가",               "현재": ""})
+        if cnt25>0:
+            levels.append({"가격": rsi25,    "구분": "🔥 집중 매수",    "설명": f"RSI25 과거 평균 (과거 {cnt25}회)", "현재": ""})
+            levels.append({"가격": rsi25_min,"구간": "🔥 극단 구간",    "설명": "RSI25 과거 최저가",               "현재": ""})
 
-        # 구간 바
-        for seg_label, p_lo, p_hi, bg, border, desc in segments:
-            lo_pos = pct_pos(p_lo); hi_pos = pct_pos(p_hi)
-            bar_pct = hi_pos - lo_pos
-            # 현재가가 이 구간에 있는지
-            in_here = p_lo <= px <= p_hi
-            highlight = "font-weight:700;" if in_here else ""
-            arrow = " ◀ 지금 여기!" if in_here else ""
-            rows_html += f'''<tr>
-  <td style="font-size:.7rem;color:{border};padding:.25rem .4rem;white-space:nowrap;{highlight}">{seg_label}{arrow}</td>
-  <td style="padding:.25rem .3rem;width:{bar_width}px">
-    <div style="background:#0f1620;border-radius:3px;height:18px;position:relative;width:100%">
-      <div style="position:absolute;left:{lo_pos:.0f}%;width:{max(bar_pct,2):.0f}%;height:18px;background:{bg};border-left:2px solid {border};border-radius:2px"></div>
-      {"<div style=\'position:absolute;left:"+str(pct_pos(px))+f"%;top:0;width:2px;height:18px;background:#e8e6f0\'></div>" if in_here else ""}
-    </div>
-  </td>
-  <td style="font-size:.65rem;color:#6b7a99;padding:.25rem .3rem;text-align:right;white-space:nowrap">${p_lo:,.0f}~${p_hi:,.0f}</td>
-</tr>'''
+        # 가격 내림차순 정렬
+        levels.sort(key=lambda x: -x["가격"])
 
-        # 주요 가격 마커
-        marker_html = ""
-        for mp, sym, mc, mlabel in sorted(markers, key=lambda x:-x[0]):
-            in_here = abs(mp-px)/px < 0.005
-            marker_html += f'<div style="display:flex;align-items:center;gap:.4rem;padding:.15rem 0;border-bottom:1px solid #1e2a3a">'                 f'<div style="width:{bar_width}px;position:relative;height:14px;background:#070a0f;border-radius:2px">'                 f'<div style="position:absolute;left:{pct_pos(mp):.0f}%;top:2px;font-size:.7rem;color:{mc};">{sym}</div></div>'                 f'<span style="font-size:.68rem;color:{mc}">{mlabel}</span></div>'
+        # 구간 레이블 (현재가 기준)
+        def zone_label(p):
+            if p >= rsi35_max:  return "⚠️ 관망"
+            elif p >= rsi35:    return "🟡 매수 고려"
+            elif p >= rsi35_min:return "⚡ 매수 시작"
+            elif p >= rsi25:    return "🔥 집중 매수"
+            else:               return "💀 극단 구간"
 
-        st.markdown(f'''<div style="background:#0a0f1a;border:1px solid #1e2a3a;border-radius:8px;padding:.8rem;margin-bottom:.5rem;overflow-x:auto">
-<table style="width:100%;border-collapse:collapse">{rows_html}</table>
-<div style="margin-top:.6rem;border-top:1px solid #1e2a3a;padding-top:.5rem">{marker_html}</div>
-</div>''',unsafe_allow_html=True)
+        # 가격 바 (유니코드 블록 문자)
+        p_max = max(l["가격"] for l in levels) * 1.02
+        p_min = min(l["가격"] for l in levels) * 0.98
+        p_rng = p_max - p_min if p_max > p_min else 1
 
-        # 리밋 주문 추천 가격
-        st.markdown('<div style="font-size:.72rem;color:#c9a84c;margin:.4rem 0 .2rem">📌 리밋 주문 추천가</div>',unsafe_allow_html=True)
-        limit_targets=[]
+        rows=[]
+        for lv in levels:
+            p=lv["가격"]
+            pos=int((p-p_min)/p_rng*20)  # 0~20
+            bar="─"*pos + "●" + "─"*(20-pos)
+            pct=(p-px)/px*100
+            rows.append({
+                "구간":  zone_label(p),
+                "가격":  f"${p:,.2f}",
+                "바":    bar,
+                "현재대비": f"{pct:+.1f}%" if abs(pct)>0.1 else "◀ 현재",
+                "설명":  lv["설명"],
+            })
+
+        st.dataframe(
+            pd.DataFrame(rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # 리밋 주문 추천가
+        st.markdown('<div style="font-size:.72rem;color:#c9a84c;margin:.6rem 0 .3rem">📌 리밋 주문 추천가</div>',unsafe_allow_html=True)
+
         if t=="IREN":
             above200=sg.get("above_sma200",True)
             bgt=1000 if mul>=2 or sg.get("is_trend") else 800
+            limit_targets=[]
             if cnt35>0:
                 limit_targets.append(("⚡ 매수 시작",  rsi35,     bgt,  f"RSI35 과거평균 — {cnt35}회 실측"))
-                limit_targets.append(("⚡ 좋은 진입",  rsi35_min, bgt,  "RSI35 과거 최저 — 강한 지지"))
+                limit_targets.append(("⚡ 강한 지지",  rsi35_min, bgt,  "RSI35 과거 최저"))
             else:
-                limit_targets.append(("⚡ 매수 시작", bb_low,    bgt,  "BB 하단 — 통계적 저점"))
+                limit_targets.append(("⚡ BB 하단",   bb_low,    bgt,  "볼린저 하단"))
             if cnt25>0:
                 limit_targets.append(("🔥 집중 매수", rsi25,     bgt,  f"RSI25 과거평균 — {cnt25}회 실측"))
-            limit_targets.append(("🛡 장기지지",   max(s200,bb_low), bgt, "SMA200 or BB하단 — 강한 지지선"))
+            limit_targets.append(("🛡 장기지지",   max(s200,bb_low), bgt, "SMA200 or BB하단"))
         elif t=="GOOGL":
             limit_targets=[
-                ("✅ 무난한 진입", px*0.99, 600, "-1% — 언제든 OK"),
-                ("⚡ 좋은 타이밍", px*0.98, 600, "-2% — 하락일 매수"),
+                ("✅ 무난한 진입", px*0.99, 600, "-1% 조정"),
+                ("⚡ 좋은 타이밍", px*0.98, 600, "-2% 조정"),
                 ("🔥 최적 타이밍", max(s200,bb_low), 600, "SMA200 or BB하단"),
             ]
-        else:  # MU
-            if cnt35>0:
-                limit_targets=[
-                    ("✅ 고정 $200",  px*0.995, 200, "항상 이 가격에 걸어두기"),
-                    ("⚡ RSI40 추가", rsi35,    200, f"RSI35 과거평균 ${rsi35:,.2f} — 추가 $200"),
-                    ("🔥 RSI30 추가", rsi25,    400, f"RSI25 과거평균 ${rsi25:,.2f} — 추가 $400"),
-                ]
-            else:
-                limit_targets=[
-                    ("✅ 고정 $200",  px*0.995, 200, "항상 이 가격에 걸어두기"),
-                    ("⚡ 추가 기회",  bb_low,   200, f"BB하단 ${bb_low:,.2f} — 추가 $200"),
-                    ("🔥 강한 지지",  s200,     400, f"SMA200 ${s200:,.2f} — 추가 $400"),
-                ]
+        else:
+            limit_targets=[
+                ("✅ 고정 $200",  px*0.995, 200, "항상 걸어두기"),
+                ("⚡ 추가 기회",  rsi35 if cnt35>0 else bb_low, 200, f"RSI35 평균 or BB하단"),
+                ("🔥 강한 지지",  rsi25 if cnt25>0 else s200,   400, f"RSI25 평균 or SMA200"),
+            ]
 
-        for lbl, lpx, lbgt, ldesc in limit_targets:
+        lt_rows=[]
+        for lbl,lpx,lbgt,ldesc in limit_targets:
             if lpx<=0: continue
             lshares=lbgt/lpx
             ldrop=(lpx-px)/px*100
-            lc="#3ecf8e" if ldrop<-1 else "#c9a84c" if ldrop<0 else "#4fa3e0"
-            st.markdown(f'''<div style="background:#0f1620;border-radius:5px;padding:.55rem .8rem;margin-bottom:.25rem;display:flex;justify-content:space-between;align-items:center">
-  <div>
-    <span style="font-size:.72rem;color:#6b7a99">{lbl}</span><br>
-    <span style="font-family:Cinzel,serif;font-size:1.05rem;color:{lc}">${lpx:,.2f}</span>
-    <span style="font-size:.65rem;color:#6b7a99;margin-left:.3rem">{ldesc}</span>
-  </div>
-  <div style="text-align:right">
-    <div style="font-size:.65rem;color:#6b7a99">${lbgt:,.0f}</div>
-    <div style="font-family:Cinzel,serif;color:#e8e6f0;font-size:.95rem">{lshares:.2f}주</div>
-    <div style="font-size:.65rem;color:{lc}">{ldrop:+.1f}%</div>
-  </div>
-</div>''',unsafe_allow_html=True)
+            lt_rows.append({
+                "구분": lbl,
+                "리밋가": f"${lpx:,.2f}",
+                "현재대비": f"{ldrop:+.1f}%",
+                "예산": f"${lbgt:,.0f}",
+                "매수주수": f"{lshares:.2f}주",
+                "메모": ldesc,
+            })
+        if lt_rows:
+            st.dataframe(pd.DataFrame(lt_rows),use_container_width=True,hide_index=True)
 
     # 전 종목 렌더링
     for t in ["IREN","GOOGL","MU"]:
