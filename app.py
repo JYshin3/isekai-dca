@@ -325,39 +325,37 @@ def sg_mu(i,ed,earn_drop_pct=0.):
 
 def allocate(sigs):
     """
-    새 예산 배분 로직:
-    1) GOOGL $800 선집행 (고정)
-    2) MU $200 최소 보장 (무조건)
-    3) 나머지 $1,000:
-       - IREN 매수 가능 → IREN 우선 투입 (최대 $1,000)
-         MU 보너스는 적용 안함 (최소 $200만)
-       - IREN STOP → MU 보너스 적용 + 잔액 GOOGL
-    4) 잔액 → GOOGL 흡수
+    2단계 분할 집행 전략:
+    ─────────────────────────────────────
+    1차 집행 (월초 즉시, ~$1,000):
+      GOOGL $800 고정
+      MU    $200 최소 보장
+    ─────────────────────────────────────
+    2차 집행 (월중 IREN 최적 타이밍, ~$1,000):
+      IREN 신호 나오면 → 그날 하락일에 $1,000 집중
+      IREN STOP → MU 보너스 or GOOGL 추가
+    ─────────────────────────────────────
     """
     iren_sig=sigs.get("IREN",{}); mu_sig=sigs.get("MU",{})
     iren_can_buy=(iren_sig.get("mul",0)>0)
-    remaining=BUDGET-800-200  # $1,000
 
+    # 1차: 고정 집행
     a={"GOOGL":800,"MU":200,"IREN":0}
+    # 1차 후 남은 예산
+    remaining=BUDGET-800-200  # $1,000 (2차 예산)
 
     if iren_can_buy:
-        # IREN 우선: 나머지 $1,000 전부 IREN
-        iren_want=iren_sig.get("amt",0)
-        iren_get=min(iren_want, remaining)
-        a["IREN"]=iren_get
-        leftover=remaining-iren_get
-        # MU는 최소 $200만 (보너스 없음)
-        if leftover>0:
-            a["GOOGL"]+=leftover  # 남은 건 GOOGL
+        # 2차: IREN에 전액 집중
+        a["IREN"]=remaining  # $1,000 전부
     else:
-        # IREN STOP → MU에 보너스 적용
-        mu_total=mu_sig.get("amt",200)  # base $200 + 보너스
-        mu_get=min(mu_total, remaining)
-        a["MU"]=mu_get
-        leftover=remaining-mu_get
-        a["IREN"]=0
-        if leftover>0:
-            a["GOOGL"]+=leftover
+        # IREN STOP → 2차 예산을 MU 보너스 or GOOGL
+        mu_bonus=mu_sig.get("amt",200)-200  # 보너스 부분만 ($0~$400)
+        if mu_bonus>0:
+            mu_extra=min(mu_bonus, remaining)
+            a["MU"]+=mu_extra
+            remaining-=mu_extra
+        if remaining>0:
+            a["GOOGL"]+=remaining  # 잔액 GOOGL 흡수
 
     return a
 
@@ -696,171 +694,169 @@ cw={t:v/pv if pv>0 else 0 for t,v in pvt.items()}
 ta0,ta1,ta2,ta3,ta4=st.tabs(["🎯 오늘 살까?","📋 매매일지","📊 종목 분석","⚖ 리밸런싱","🏆 목표 추적"])
 
 with ta0:
-    st.markdown('<div class="st2">🎯 오늘의 매수 결정</div>',unsafe_allow_html=True)
+    st.markdown('<div class="st2">🎯 오늘 살까?</div>',unsafe_allow_html=True)
 
     today=datetime.now()
-    is_month_start=today.day<=7  # 1~7일 = 월초 GOOGL 매수 타이밍
+    weekday=today.weekday()  # 0=월,1=화,...,4=금
+    day_of_month=today.day
+    is_month_start=day_of_month<=7
+    is_mid_month=10<=day_of_month<=20
 
-    def buy_decision(t, ind, sg, alloc_amt, uranium=68.):
-        """
-        오늘 살까? 3단계 판정:
-        🟢 지금 사세요 / 🟡 관망 (조건 안좋음) / 🔴 오늘은 패스
-        """
+    # ── 매수 적합도 점수 계산 (0~100)
+    def calc_score(t, ind, sg):
+        """오늘 이 종목을 사기 좋은 날인지 점수로 판단"""
         rv   = ind.get("rsi",50)
-        pc   = ind.get("price_chg",0)    # 오늘 변동률
+        pc   = ind.get("price_chg",0)      # 오늘 변동률
         zs   = ind.get("z_score",0)
         mh   = ind.get("macd_hist",0)
         mhp  = ind.get("macd_hist_prev",mh)
-        atr  = ind.get("atr",0)
-        atr_a= ind.get("atr_avg",1)
+        vs   = ind.get("vol_spike",1.0)
+        bb_l = ind.get("bb_lower",0)
+        px   = ind.get("price",0)
         adv  = ind.get("adx",20)
-        chg1w= ind.get("chg_1w",0)
-        sk   = ind.get("stoch_k",50)
-        mul  = sg.get("mul",0)
+        above200 = sg.get("above_sma200",True) if t=="IREN" else True
 
-        if t=="GOOGL":
-            if is_month_start:
-                return "🟢","지금 사세요","월초(1~7일) — 고정 DCA 집행 타이밍","$800 매수"
-            else:
-                return "🟡","월말 대기","GOOGL은 매월 1~7일에 매수. 아직 기다리세요","—"
+        score=0
+        reasons=[]
 
-        if t=="IREN":
-            is_trend=sg.get("is_trend",False)
-            trend_conds=sg.get("trend_conds",{})
-            trend_cnt=sg.get("trend_cnt",0)
-            ic=sg.get("ic",0)
-            above200=sg.get("above_sma200",True)
-            s200_txt="SMA200 위 ✅" if above200 else "SMA200 아래 ⚠️"
+        # 1. 당일 변동률 (최대 30점)
+        if pc<=-3:
+            score+=30; reasons.append(f"오늘 {pc:.1f}% 하락 +30점")
+        elif pc<=-1.5:
+            score+=20; reasons.append(f"오늘 {pc:.1f}% 하락 +20점")
+        elif pc<=-0.5:
+            score+=10; reasons.append(f"오늘 {pc:.1f}% 소폭 하락 +10점")
+        elif pc>=2:
+            score-=15; reasons.append(f"오늘 {pc:.1f}% 상승 -15점 (비쌈)")
 
-            # 완전 STOP
-            if rv>75 or (atr>atr_a*2 and atr_a>0):
-                return "🔴","오늘은 패스",f"RSI {rv:.0f}>75 완전 과열 or 변동성 폭발 — 기다려요","매수 금지"
+        # 2. RSI 위치 (최대 25점)
+        if rv<30:
+            score+=25; reasons.append(f"RSI {rv:.0f} 극과매도 +25점")
+        elif rv<40:
+            score+=20; reasons.append(f"RSI {rv:.0f} 과매도 +20점")
+        elif rv<50:
+            score+=10; reasons.append(f"RSI {rv:.0f} 중립하단 +10점")
+        elif rv>70:
+            score-=20; reasons.append(f"RSI {rv:.0f} 과열 -20점")
+        elif rv>60:
+            score-=10; reasons.append(f"RSI {rv:.0f} 상단 -10점")
 
-            # 불장 추세 매수
-            if is_trend:
-                cond_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in trend_conds.items())
-                return "🟢","지금 사세요 📈",f"불장! RSI {rv:.0f} 과열이지만 {trend_cnt}/4조건 | {cond_txt}",f"${alloc_amt:,.0f} (추세 1×)"
+        # 3. 볼린저밴드 하단 근접 (최대 20점)
+        if px>0 and bb_l>0:
+            bb_dist=(px-bb_l)/px*100
+            if bb_dist<1:
+                score+=20; reasons.append(f"BB 하단 터치 +20점")
+            elif bb_dist<3:
+                score+=12; reasons.append(f"BB 하단 근접 +12점")
+            elif bb_dist<5:
+                score+=5; reasons.append(f"BB 하단 접근 +5점")
 
-            # RSI 60~75, 추세 조건 미충족
-            if rv>60:
-                cond_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in trend_conds.items())
-                return "🟡","대기",f"RSI {rv:.0f} 과열, 추세조건 {trend_cnt}/4 미충족 | {cond_txt}","—"
+        # 4. 요일 (최대 15점)
+        if weekday==0:
+            score+=15; reasons.append("월요일 +15점 (주초 약세)")
+        elif weekday==1:
+            score+=10; reasons.append("화요일 +10점")
+        elif weekday==4:
+            score+=5; reasons.append("금요일 +5점 (포지션 정리 마무리)")
 
-            # 극과매도 RSI<25
-            if rv<25:
-                reasons=[]
-                if zs<-1.5: reasons.append(f"Z-Score {zs:+.1f}")
-                if mh>mhp:  reasons.append("MACD 반등")
-                if chg1w<-5:reasons.append(f"1주 -{abs(chg1w):.0f}%")
-                r=", ".join(reasons) if reasons else "극과매도"
-                if above200:
-                    return "🟢","지금 사세요 🔥🔥",f"RSI {rv:.0f} 극과매도 + {s200_txt} — {r} 공황매수 기회!",f"${alloc_amt:,.0f} ({mul}×)"
-                else:
-                    return "🟢","지금 사세요 ⚡",f"RSI {rv:.0f} 극과매도 but {s200_txt} — 추세 하락 중, 3배→2배 제한. {r}",f"${alloc_amt:,.0f} ({mul}×)"
+        # 5. 월중 시기 (최대 10점)
+        if is_mid_month:
+            score+=10; reasons.append(f"{day_of_month}일 월중 +10점")
+        elif is_month_start:
+            score+=5; reasons.append(f"{day_of_month}일 월초 +5점")
 
-            # 과매도 RSI<35
-            if rv<35:
-                reasons=[]
-                if zs<-1.5: reasons.append(f"Z-Score {zs:+.1f} 저평가")
-                if mh>mhp:  reasons.append("MACD 반등 중")
-                r=", ".join(reasons) if reasons else ""
-                if above200:
-                    return "🟢","지금 사세요 ⚡",f"RSI {rv:.0f} 과매도 + {s200_txt} — 눌림목. {r}",f"${alloc_amt:,.0f} ({mul}×)"
-                else:
-                    return "🟢","1배만 사세요",f"RSI {rv:.0f} 과매도지만 {s200_txt} — 추세 하락 중, 섣불리 2배 금지. 저점이 더 올 수 있어요. {r}",f"${alloc_amt:,.0f} (1×)"
+        # 6. IREN 전용: SMA200 위 여부
+        if t=="IREN" and not above200:
+            score-=15; reasons.append("SMA200 아래 -15점 (하락추세)")
 
-            # 불타기
-            if ic>=2:
-                if above200:
-                    return "🟢","지금 사세요 🔥",f"불타기 {ic}/4 + {s200_txt} — 모멘텀 확인",f"${alloc_amt:,.0f} ({mul}×)"
-                else:
-                    return "🟡","소량만",f"불타기 {ic}/4 충족이지만 {s200_txt} — 배율 유지, 추세 반전 미확인",f"${alloc_amt:,.0f} ({mul}×)"
+        # 7. MACD 방향
+        if mh>mhp and mh>0:
+            score+=5; reasons.append("MACD 상승 +5점")
+        elif mh<mhp and mh<0:
+            score-=5; reasons.append("MACD 하락 -5점")
 
-            # 중립
-            if 35<=rv<=50:
-                if above200:
-                    return "🟡","조금 기다려요",f"RSI {rv:.0f} 중립 + {s200_txt} — 더 눌리면 더 좋음","$800 (1×)"
-                else:
-                    return "🟡","신중하게",f"RSI {rv:.0f} 중립 + {s200_txt} — 하락추세 주의, 기본 매수만","$800 (1×)"
+        score=max(0,min(100,score))
+        return score, reasons
 
-            if above200:
-                return "🟡","관망",f"RSI {rv:.0f} 중상단 + {s200_txt} — 눌림 기다려요","—"
-            else:
-                return "🟡","관망",f"RSI {rv:.0f} + {s200_txt} — 하락추세 중. 추세 전환 확인 후 매수","—"
+    # ── 판정
+    def get_verdict(score, mul, t):
+        if mul==0:
+            return "🔴","오늘은 패스","신호 자체가 없음"
+        if score>=85:
+            return "🟢","오늘이 최적!","지금 사세요"
+        elif score>=65:
+            return "🟢","오늘 사세요","좋은 타이밍"
+        elif score>=45:
+            return "🟡","사도 되지만","내일이 더 좋을 수도"
+        elif score>=30:
+            return "🟡","기다려요","며칠 더 지켜봐요"
+        else:
+            return "🔴","오늘은 패스","타이밍 안 좋음"
 
-
-        if t=="MU":
-            mu_amt=alloc.get("MU",200)
-            earn_bonus=sg.get("earn_bonus",0)
-            rsi_bonus=sg.get("rsi_bonus",0)
-            is_hot=sg.get("is_hot",False)
-            # 항상 사는 종목 — 상태만 다름
-            if is_hot:
-                return "🟡","최소 매수 ($200)",f"RSI {rv:.0f} 과열 — 정기 $200만 집행. IREN STOP이면 보너스 없음",f"${mu_amt:,.0f}"
-            if earn_bonus>0 and rsi_bonus>0:
-                return "🟢","집중 매수! 🎯",f"실적급락 +${earn_bonus} + RSI {rv:.0f} 과매도 +${rsi_bonus} 동시 발생!",f"${mu_amt:,.0f}"
-            if earn_bonus>0:
-                return "🟢","실적 기회 매수",f"실적 급락 이벤트 +${earn_bonus} 보너스 (IREN STOP 시 적용)",f"${mu_amt:,.0f}"
-            if rsi_bonus>0:
-                return "🟢","과매도 추가 매수",f"RSI {rv:.0f} 과매도 +${rsi_bonus} (IREN STOP 시 적용)",f"${mu_amt:,.0f}"
-            return "🟢","정기 매수",f"RSI {rv:.0f} — 매달 $200 정기 집행",f"${mu_amt:,.0f}"
-
-        return "🟡","관망","—","—"
-
-    # ── 판정 실행
-    decisions={}
+    # ── 각 종목 계산
+    results={}
     for t,info in TICKERS.items():
-        ind=inds.get(t,{}); sg=sigs[t]; amt=alloc.get(t,0)
-        emoji,label,reason,action=buy_decision(t,ind,sg,amt,uranium)
-        decisions[t]=(emoji,label,reason,action)
+        ind=inds.get(t,{}); sg=sigs[t]
+        mul=sg.get("mul",0)
+        score,reasons=calc_score(t,ind,sg)
+        em,verdict,advice=get_verdict(score,mul,t)
+        amt=alloc.get(t,0)
+        results[t]={
+            "score":score,"reasons":reasons,
+            "em":em,"verdict":verdict,"advice":advice,
+            "mul":mul,"amt":amt,
+            "rsi":ind.get("rsi",0),"pc":ind.get("price_chg",0),
+            "px":prices.get(t,0),"ind":ind,"sg":sg,
+        }
 
-    # ── 오늘 총 추천 매수액
-    today_buy=0
-    for t,(em,lb,rs,ac) in decisions.items():
-        if em=="🟢" and "$" in ac:
-            try: today_buy+=int(ac.replace("$","").replace(",","").split()[0])
-            except: pass
+    # ── 상단 요약
+    buy_today=[t for t,r in results.items() if r["em"]=="🟢"]
+    total_today=sum(results[t]["amt"] for t in buy_today)
+    avg_score=sum(r["score"] for r in results.values())/len(results)
 
-    # ── 요약 카드
-    green_cnt=sum(1 for em,_,_,_ in decisions.values() if em=="🟢")
-    red_cnt  =sum(1 for em,_,_,_ in decisions.values() if em=="🔴")
     c1,c2,c3=st.columns(3)
     with c1:
-        gc="#3ecf8e" if green_cnt>=2 else "#c9a84c"
-        st.markdown(f'<div class="mb card-g"><div class="ml">매수 추천</div><div class="mv" style="color:{gc}">{green_cnt}종목</div><div class="ms">오늘 사세요</div></div>',unsafe_allow_html=True)
+        gc="#3ecf8e" if len(buy_today)>=2 else "#c9a84c"
+        st.markdown(f'<div class="mb card-g"><div class="ml">오늘 매수 추천</div><div class="mv" style="color:{gc}">{len(buy_today)}종목</div><div class="ms">오늘 사세요</div></div>',unsafe_allow_html=True)
     with c2:
-        st.markdown(f'<div class="mb"><div class="ml">오늘 예상 지출</div><div class="mv">${today_buy:,.0f}</div><div class="ms">/ 월 $2,000</div></div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="mb"><div class="ml">오늘 예상 지출</div><div class="mv">${total_today:,.0f}</div><div class="ms">/ 월 $2,000</div></div>',unsafe_allow_html=True)
     with c3:
-        sc2="#e05c5c" if red_cnt>=3 else "#c9a84c" if red_cnt>=1 else "#3ecf8e"
-        market_feel="과열 주의" if red_cnt>=3 else "혼조" if red_cnt>=1 else "매수 우호적"
-        st.markdown(f'<div class="mb"><div class="ml">시장 온도</div><div class="mv" style="color:{sc2}">{market_feel}</div><div class="ms">{red_cnt}종목 과열</div></div>',unsafe_allow_html=True)
+        day_names=["월","화","수","목","금","토","일"]
+        sc="#3ecf8e" if avg_score>=65 else "#c9a84c" if avg_score>=45 else "#e05c5c"
+        st.markdown(f'<div class="mb"><div class="ml">오늘 타이밍 점수</div><div class="mv" style="color:{sc}">{avg_score:.0f}점</div><div class="ms">{day_names[weekday]}요일 · {day_of_month}일</div></div>',unsafe_allow_html=True)
 
     st.markdown("<br>",unsafe_allow_html=True)
 
-    # ── 종목별 결정 카드
-    priority_order=["IREN","GOOGL","MU"]  # 수익 기여도 순
-    for t in priority_order:
-        info=TICKERS[t]; em,lb,rs,ac=decisions[t]
-        ind=inds.get(t,{}); rv=ind.get("rsi",0); pc=ind.get("price_chg",0)
-        px=prices.get(t,0)
+    # ── 종목별 카드 (IREN 우선)
+    for t in ["IREN","GOOGL","MU"]:
+        r=results[t]; info=TICKERS[t]
+        score=r["score"]; em=r["em"]; verdict=r["verdict"]
+        advice=r["advice"]; amt=r["amt"]; mul=r["mul"]
+        rv=r["rsi"]; pc=r["pc"]; px=r["px"]
 
-        if em=="🟢":
-            bg="#061a06"; border="#3ecf8e"; tc="#3ecf8e"; border_w="3px"
+        # 색상
+        if em=="🟢" and score>=85:
+            bg="#041a04"; border="#2fff9e"; tc="#2fff9e"; bw="4px"
+        elif em=="🟢":
+            bg="#061a06"; border="#3ecf8e"; tc="#3ecf8e"; bw="3px"
         elif em=="🔴":
-            bg="#1a0606"; border="#e05c5c"; tc="#e05c5c"; border_w="3px"
+            bg="#1a0606"; border="#e05c5c"; tc="#e05c5c"; bw="3px"
         else:
-            bg="#141406"; border="#c9a84c"; tc="#c9a84c"; border_w="2px"
+            bg="#141406"; border="#c9a84c"; tc="#c9a84c"; bw="2px"
 
         pc_c="#3ecf8e" if pc>=0 else "#e05c5c"
         pc_s="▲" if pc>=0 else "▼"
         rsi_c="#e05c5c" if rv>65 else "#e08c3c" if rv>50 else "#3ecf8e" if rv<35 else "#4fa3e0"
 
-        # 매수금액 파싱
-        is_buy = em=="🟢" and "$" in ac
-        ac_display = ac if ac not in ["—","매수 금지"] else ("⛔ 매수 금지" if ac=="매수 금지" else "— 관망")
+        # 점수 바
+        bar_color="#2fff9e" if score>=85 else "#3ecf8e" if score>=65 else "#c9a84c" if score>=45 else "#e05c5c"
+        score_bar=f'<div style="background:#0f1620;border-radius:4px;height:6px;margin:.3rem 0"><div style="width:{score}%;height:6px;background:{bar_color};border-radius:4px"></div></div>'
 
-        st.markdown(f'''<div style="background:{bg};border-left:{border_w} solid {border};border:1px solid {border}44;border-left:{border_w} solid {border};border-radius:10px;padding:1.2rem 1.1rem;margin-bottom:.8rem">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+        amt_display=f"${amt:,.0f}" if amt>0 else "—"
+        mul_display=f"{mul}×" if mul>0 else "STOP"
+
+        st.markdown(f'''<div style="background:{bg};border-left:{bw} solid {border};border:1px solid {border}44;border-left:{bw} solid {border};border-radius:10px;padding:1.2rem 1.1rem;margin-bottom:.8rem">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.5rem">
     <div>
       <span style="font-family:Cinzel,serif;font-size:1.3rem;color:#e8e6f0">{t}</span>
       <span style="font-size:.7rem;color:#6b7a99;margin-left:.5rem">{info["name"]}</span>
@@ -870,51 +866,106 @@ with ta0:
       <div style="font-size:.75rem;color:{pc_c}">{pc_s} {abs(pc):.1f}%</div>
     </div>
   </div>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.7rem">
-    <div style="font-size:1.5rem;color:{tc};font-weight:700">{em} {lb}</div>
-    <div style="background:{border}22;color:{tc};border:1.5px solid {border};padding:.3rem .9rem;border-radius:6px;font-family:Cinzel,serif;font-size:1.1rem;font-weight:700">{ac_display}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+    <div>
+      <span style="font-size:1.4rem;font-weight:700;color:{tc}">{em} {verdict}</span><br>
+      <span style="font-size:.8rem;color:#9ba8bb">{advice}</span>
+    </div>
+    <div style="text-align:right">
+      <div style="font-family:Cinzel,serif;font-size:1.3rem;color:{tc}">{amt_display}</div>
+      <div style="font-size:.72rem;color:#6b7a99">배율 {mul_display} · RSI <span style="color:{rsi_c}">{rv:.0f}</span></div>
+    </div>
   </div>
-  <div style="background:#0f1620;border-radius:6px;padding:.5rem .7rem;font-size:.8rem;color:#9ba8bb;line-height:1.6">
-    💬 {rs}<br>
-    <span style="color:#6b7a99">RSI </span><span style="color:{rsi_c};font-size:.9rem;font-weight:600">{rv:.0f}</span>
-  </div>
-</div>''',unsafe_allow_html=True)
+  <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
+    <span style="font-size:.72rem;color:#6b7a99;white-space:nowrap">타이밍 점수</span>
+    <div style="flex:1;background:#0f1620;border-radius:4px;height:8px"><div style="width:{score}%;height:8px;background:{bar_color};border-radius:4px"></div></div>
+    <span style="font-family:Cinzel,serif;font-size:1rem;color:{bar_color};font-weight:700;min-width:2.5rem;text-align:right">{score}점</span>
+  </div>''',unsafe_allow_html=True)
 
-    # ── IREN 특별 설명
+        # 점수 이유 (펼치기)
+        with st.expander(f"  {t} 점수 상세 ({score}점)"):
+            for reason in r["reasons"]:
+                color="#3ecf8e" if "+" in reason and "-" not in reason.split("+")[0] else "#e05c5c" if "-" in reason else "#6b7a99"
+                st.markdown(f'<div style="font-size:.72rem;color:{color};padding:.15rem 0">• {reason}</div>',unsafe_allow_html=True)
+            # 날짜 정보
+            st.markdown(f'<div style="font-size:.68rem;color:#6b7a99;margin-top:.3rem;border-top:1px solid #1e2a3a;padding-top:.3rem">요일: {["월","화","수","목","금","토","일"][weekday]}요일 · 월중 {day_of_month}일 · {"월초(1~7일)" if is_month_start else "월중(10~20일)" if is_mid_month else "기타"}</div>',unsafe_allow_html=True)
+
+        # IREN 전용: SMA200, 불장 조건 표시
+        if t=="IREN":
+            sg=sigs["IREN"]
+            above200=sg.get("above_sma200",True)
+            trend_conds=sg.get("trend_conds",{})
+            trend_cnt=sg.get("trend_cnt",0)
+            ic=sg.get("ic",0)
+            s200c="#3ecf8e" if above200 else "#e05c5c"
+            s200t="SMA200 위 ✅ 장기 상승추세" if above200 else "SMA200 아래 ⚠️ 하락추세 — 2배 자동 제한"
+            st.markdown(f'<div style="font-size:.72rem;color:{s200c};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{s200t}</div>',unsafe_allow_html=True)
+            if trend_cnt>0:
+                cond_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in trend_conds.items())
+                st.markdown(f'<div style="font-size:.68rem;color:#6b7a99;margin-top:.2rem">불장조건 {trend_cnt}/4: {cond_txt}</div>',unsafe_allow_html=True)
+            if ic>0:
+                ign=sg.get("ign",{})
+                ign_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in ign.items())
+                st.markdown(f'<div style="font-size:.68rem;color:#c9a84c;margin-top:.2rem">🔥 불타기 {ic}/4: {ign_txt}</div>',unsafe_allow_html=True)
+
+        st.markdown("",unsafe_allow_html=True)
+
+    # ── 원칙 알림
     st.markdown("---")
-    iren_ind=inds.get("IREN",{}); iren_rv=iren_ind.get("rsi",50)
-    iren_chg=iren_ind.get("price_chg",0); iren_1w=iren_ind.get("chg_1w",0)
-    st.markdown('<div class="st2">⚡ IREN 매수 전략 가이드</div>',unsafe_allow_html=True)
-    st.markdown(f'''<div class="card">
-<div style="font-size:.78rem;line-height:2">
-  <b style="color:#c9a84c">IREN은 모멘텀 + 역추세 혼합 전략</b><br>
-  📌 <b>언제 사야 하나?</b><br>
-  &nbsp;&nbsp;• RSI &lt; 35 → <span style="color:#3ecf8e">⚡ 2배 매수</span> — 과매도 구간, 평균단가 낮추기 최적<br>
-  &nbsp;&nbsp;• RSI &lt; 25 + 당일 -10% → <span style="color:#3ecf8e">🔥 3배 매수</span> — 공황 매수, 최고 기회<br>
-  &nbsp;&nbsp;• 불타기 2개↑ + RSI &lt; 60 → <span style="color:#3ecf8e">배율 1단계 UP</span> — 추세 전환 확인<br>
-  📌 <b>언제 기다려야 하나?</b><br>
-  &nbsp;&nbsp;• RSI &gt; 60 → <span style="color:#e05c5c">❌ 과열, 무조건 패스</span><br>
-  &nbsp;&nbsp;• RSI 50~60 → <span style="color:#c9a84c">🟡 오늘보단 내일</span> — 더 눌릴 때 사는 게 유리<br>
-  📊 <b>현재 상태:</b> RSI <span style="color:{"#3ecf8e" if iren_rv<35 else "#e05c5c" if iren_rv>60 else "#c9a84c"}">{iren_rv:.0f}</span>
-  &nbsp;·&nbsp; 오늘 <span style="color:{"#3ecf8e" if iren_chg>=0 else "#e05c5c"}">{iren_chg:+.1f}%</span>
-  &nbsp;·&nbsp; 1주 <span style="color:{"#3ecf8e" if iren_1w>=0 else "#e05c5c"}">{iren_1w:+.1f}%</span>
-</div></div>''',unsafe_allow_html=True)
+    month_spent=sum(alloc.values())
+    month_left=BUDGET-month_spent
+    if month_left>0:
+        st.markdown(f'<div class="info">💡 이번 달 아직 ${month_left:,.0f} 남음 — 신호 안 나오면 월말에 GOOGL로 집행</div>',unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="ok">✅ 이번 달 예산 전액 집행 완료</div>',unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown('<div class="st2">📅 이번달 DCA 계획</div>',unsafe_allow_html=True)
-    extra=alloc.get("GOOGL",0)-600
-    if extra>0: st.markdown(f'<div class="info">ℹ️ 신호 미충족 → GOOGL 추가 흡수 +${extra:.0f} (총 ${alloc["GOOGL"]:,.0f})</div>',unsafe_allow_html=True)
+
+    # 1차/2차 집행 현황
+    first_exec=800+200  # GOOGL+MU 고정
+    second_exec=alloc.get("IREN",0)
+    googl_extra=alloc.get("GOOGL",0)-800
+    mu_extra=alloc.get("MU",0)-200
+
+    cc1,cc2=st.columns(2)
+    with cc1:
+        st.markdown(f'''<div style="background:#0a1a2a;border:1px solid #4fa3e044;border-left:3px solid #4fa3e0;border-radius:8px;padding:.9rem">
+  <div style="font-size:.65rem;color:#4fa3e0;letter-spacing:2px;margin-bottom:.3rem">1차 집행 · 월초 즉시</div>
+  <div style="font-family:Cinzel,serif;font-size:1.4rem;color:#e8e6f0">${first_exec:,.0f}</div>
+  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $800 + MU $200<br>신호 무관 고정 집행</div>
+</div>''',unsafe_allow_html=True)
+    with cc2:
+        iren_rdy=alloc.get("IREN",0)>0
+        c2bg="#0a2a0a" if iren_rdy else "#1a1a0a"
+        c2border="#3ecf8e" if iren_rdy else "#c9a84c"
+        c2color="#3ecf8e" if iren_rdy else "#c9a84c"
+        c2status="신호 발생 — 하락일 기다려 집행" if iren_rdy else "IREN 신호 없음 — 다른 용도"
+        c2amt=alloc.get("IREN",0) if iren_rdy else (200+mu_extra+googl_extra)
+        st.markdown(f'''<div style="background:{c2bg};border:1px solid {c2border}44;border-left:3px solid {c2border};border-radius:8px;padding:.9rem">
+  <div style="font-size:.65rem;color:{c2color};letter-spacing:2px;margin-bottom:.3rem">2차 집행 · 월중 최적 타이밍</div>
+  <div style="font-family:Cinzel,serif;font-size:1.4rem;color:#e8e6f0">${c2amt:,.0f}</div>
+  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">{"IREN 집중 — 오늘 점수 65↑ 하락일에 집행" if iren_rdy else "IREN STOP → MU보너스 or GOOGL 추가"}</div>
+</div>''',unsafe_allow_html=True)
+
+    st.markdown("<br>",unsafe_allow_html=True)
     rw_plan=[]
     for t_p,info_p in TICKERS.items():
         sg_p=sigs[t_p]; amt_p=alloc.get(t_p,0); px_p=prices.get(t_p,0)
         sh_p=amt_p/px_p if px_p>0 and amt_p>0 else 0
-        rw_plan.append({"종목":t_p,"신호":sg_p["txt"],"배율":f"{sg_p['mul']}×","배정액":f"${amt_p:,.0f}","매수주수":f"{sh_p:.4f}" if sh_p>0 else "—","현재가":f"${px_p:,.2f}"})
+        score_p=results[t_p]["score"]
+        phase="1차 월초" if t_p in ["GOOGL","MU"] else "2차 타이밍"
+        rw_plan.append({"집행":phase,"종목":t_p,"신호":sg_p["txt"],
+                        "오늘점수":f"{score_p}점","배정액":f"${amt_p:,.0f}",
+                        "매수주수":f"{sh_p:.4f}" if sh_p>0 else "—","현재가":f"${px_p:,.2f}"})
     st.dataframe(pd.DataFrame(rw_plan),use_container_width=True,hide_index=True)
-    st.markdown('''<div class="card" style="margin-top:.8rem"><div class="st2">📌 월별 운용 규칙</div>
-<table><tr><th>단계</th><th>행동</th><th>비고</th></tr>
-<tr><td>1</td><td>GOOGL $600 선매수</td><td>매달 고정</td></tr>
-<tr><td>2~3</td><td>IREN→MU 신호순</td><td>우선순위 예산 배분</td></tr>
-<tr><td>6</td><td>잔액 → GOOGL 추가</td><td>100% 집행 원칙</td></tr>
+
+    st.markdown('''<div class="card" style="margin-top:.8rem"><div class="st2">📌 2단계 집행 원칙</div>
+<table><tr><th>단계</th><th>시기</th><th>행동</th><th>금액</th></tr>
+<tr><td>1차</td><td>월초 즉시</td><td>GOOGL + MU 고정 집행</td><td>$1,000</td></tr>
+<tr><td>2차</td><td>월중 최적일</td><td>IREN 신호 + 점수65↑ + 하락일</td><td>$1,000</td></tr>
+<tr><td>2차 대체</td><td>IREN STOP 시</td><td>MU 보너스 or GOOGL 추가</td><td>$1,000</td></tr>
+<tr><td>★ 원칙</td><td>월말까지</td><td>신호 없어도 반드시 전액 집행</td><td>100%</td></tr>
 </table></div>''',unsafe_allow_html=True)
 
 
