@@ -48,8 +48,8 @@ td{padding:.55rem .5rem;border-bottom:1px solid #1e2a3a30;}
 
 # ── CONSTANTS ──
 TICKERS = {
-    "GOOGL":{"name":"Alphabet",         "weight":.40,"color":"#4fa3e0","base":800},
-    "IREN": {"name":"IREN Ltd",          "weight":.40,"color":"#c9a84c","base":800},
+    "GOOGL":{"name":"Alphabet",         "weight":.30,"color":"#4fa3e0","base":600},
+    "IREN": {"name":"IREN Ltd",          "weight":.50,"color":"#c9a84c","base":1000},
     "MU":   {"name":"Micron Technology", "weight":.20,"color":"#3ecf8e","base":400},
 }
 BUDGET=2000; TARGET=500000; MONTHS=36; PF_FILE=Path("portfolio.json")
@@ -170,7 +170,7 @@ def compute(df,p):
     }
 
 # ── SIGNALS ──
-def sg_googl(i): return {"mul":1,"txt":"✅ 고정 매수 (DCA 앵커)","amt":800}
+def sg_googl(i): return {"mul":1,"txt":"✅ 고정 매수 (DCA 앵커)","amt":600}
 
 def sg_iren(i):
     rv=i.get("rsi",50); at=i.get("atr",0); ata=i.get("atr_avg",1)
@@ -340,9 +340,9 @@ def allocate(sigs):
     iren_can_buy=(iren_sig.get("mul",0)>0)
 
     # 1차: 고정 집행
-    a={"GOOGL":800,"MU":200,"IREN":0}
+    a={"GOOGL":600,"MU":200,"IREN":0}
     # 1차 후 남은 예산
-    remaining=BUDGET-800-200  # $1,000 (2차 예산)
+    remaining=BUDGET-600-200  # $1,200 (2차 예산)
 
     if iren_can_buy:
         # 2차: IREN 신호 강도에 따라 배분
@@ -824,6 +824,23 @@ with ta0:
     total_today=sum(results[t]["amt"] for t in buy_today)
     avg_score=sum(r["score"] for r in results.values())/len(results)
 
+    # ── 목표 비중 표시
+    wt_cols=st.columns(3)
+    for i,(t,info) in enumerate(TICKERS.items()):
+        cur_w=cw.get(t,0)*100
+        tgt_w=info["weight"]*100
+        diff=cur_w-tgt_w
+        diff_c="#e05c5c" if abs(diff)>5 else "#c9a84c" if abs(diff)>2 else "#3ecf8e"
+        with wt_cols[i]:
+            st.markdown(f'''<div style="background:#0f1620;border:1px solid {info["color"]}44;border-top:3px solid {info["color"]};border-radius:8px;padding:.7rem;text-align:center;margin-bottom:.5rem">
+  <div style="font-family:Cinzel,serif;font-size:1rem;color:{info["color"]}">{t}</div>
+  <div style="font-size:1.5rem;font-weight:700;color:#e8e6f0;font-family:Cinzel,serif">{tgt_w:.0f}%</div>
+  <div style="font-size:.68rem;color:#6b7a99">목표비중</div>
+  <div style="font-size:.72rem;color:{diff_c};margin-top:.2rem">현재 {cur_w:.1f}% ({diff:+.1f}%)</div>
+</div>''',unsafe_allow_html=True)
+
+    st.markdown("<br>",unsafe_allow_html=True)
+
     c1,c2,c3=st.columns(3)
     with c1:
         gc="#3ecf8e" if len(buy_today)>=2 else "#c9a84c"
@@ -906,7 +923,13 @@ with ta0:
         # 점수 이유 (펼치기)
         with st.expander(f"  {t} 점수 상세 ({score}/100점)"):
             for reason in r["reasons"]:
-                color="#3ecf8e" if "+" in reason and "-" not in reason.split("+")[0] else "#e05c5c" if "-" in reason else "#6b7a99"
+                # 점수 부호 기준으로 색상 결정 (마지막 +N점/-N점)
+                import re as _re
+                _m=_re.search(r'([+\-])(\d+)점',reason)
+                if _m:
+                    color="#3ecf8e" if _m.group(1)=="+" else "#e05c5c"
+                else:
+                    color="#6b7a99"
                 st.markdown(f'<div style="font-size:.72rem;color:{color};padding:.15rem 0">• {reason}</div>',unsafe_allow_html=True)
             # 날짜 정보
             st.markdown(f'<div style="font-size:.68rem;color:#6b7a99;margin-top:.3rem;border-top:1px solid #1e2a3a;padding-top:.3rem">요일: {["월","화","수","목","금","토","일"][weekday]}요일 · 월중 {day_of_month}일 · {"월초(1~7일)" if is_month_start else "월중(10~20일)" if is_mid_month else "기타"}</div>',unsafe_allow_html=True)
@@ -1049,7 +1072,7 @@ with ta0:
     st.markdown('<div class="st2">📅 이번달 DCA 계획</div>',unsafe_allow_html=True)
 
     # 1차/2차 집행 현황
-    first_exec=800+200  # GOOGL+MU 고정
+    first_exec=600+200  # GOOGL+MU 고정
     second_exec=alloc.get("IREN",0)
     googl_extra=alloc.get("GOOGL",0)-800
     mu_extra=alloc.get("MU",0)-200
@@ -1566,7 +1589,7 @@ with ta3:
 <tr><td>매수 우선</td><td>비중 조정은 부족한 종목 매수로 먼저 해결</td></tr>
 <tr><td>매도 최소화</td><td>매수 후에도 5%↑ 초과 시에만 최소 매도</td></tr>
 <tr><td>세금 고려</td><td>1년 이상 보유 → 장기 양도세(15%) 적용</td></tr>
-<tr><td>Rule 1</td><td>IREN >50% → GOOGL 50%/MU 50%</td></tr>
+<tr><td>Rule 1</td><td>IREN >60% → GOOGL 50%/MU 50%</td></tr>
 <tr><td>Rule 2</td><td>GOOGL >40% → IREN 로테이션</td></tr>
 
 
