@@ -345,8 +345,18 @@ def allocate(sigs):
     remaining=BUDGET-800-200  # $1,000 (2차 예산)
 
     if iren_can_buy:
-        # 2차: IREN에 전액 집중
-        a["IREN"]=remaining  # $1,000 전부
+        # 2차: IREN 신호 강도에 따라 배분
+        # 배율 1× → $800, 추세매수/2× → $1,000, 3× → $1,000
+        iren_mul=iren_sig.get("mul",1)
+        is_trend=iren_sig.get("is_trend",False)
+        if iren_mul>=2 or is_trend:
+            iren_get=remaining          # 강한 신호: $1,000 전부
+        else:
+            iren_get=min(800, remaining) # 기본 1×: $800
+        a["IREN"]=iren_get
+        leftover=remaining-iren_get
+        if leftover>0:
+            a["GOOGL"]+=leftover         # 남은 건 GOOGL
     else:
         # IREN STOP → 2차 예산을 MU 보너스 or GOOGL
         mu_bonus=mu_sig.get("amt",200)-200  # 보너스 부분만 ($0~$400)
@@ -912,12 +922,13 @@ with ta0:
 
     # ── 원칙 알림
     st.markdown("---")
-    month_spent=sum(alloc.values())
-    month_left=BUDGET-month_spent
+    month_plan=sum(alloc.values())
+    month_left=BUDGET-month_plan
+    # "집행 완료"가 아니라 "이번 달 계획" 표시 (실제 집행 여부는 매매일지 기준)
     if month_left>0:
-        st.markdown(f'<div class="info">💡 이번 달 아직 ${month_left:,.0f} 남음 — 신호 안 나오면 월말에 GOOGL로 집행</div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="info">📋 이번 달 계획: ${ month_plan:,.0f} 배정 / ${month_left:,.0f} 미배정 (IREN 신호 대기 or 월말 GOOGL 집행)</div>',unsafe_allow_html=True)
     else:
-        st.markdown('<div class="ok">✅ 이번 달 예산 전액 집행 완료</div>',unsafe_allow_html=True)
+        st.markdown(f'<div class="info">📋 이번 달 예산 ${month_plan:,.0f} 전액 배정 완료 — 실제 집행은 매매일지에 기록하세요</div>',unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown('<div class="st2">📅 이번달 DCA 계획</div>',unsafe_allow_html=True)
