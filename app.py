@@ -824,22 +824,36 @@ with ta0:
     total_today=sum(results[t]["amt"] for t in buy_today)
     avg_score=sum(r["score"] for r in results.values())/len(results)
 
-    # ── 목표 비중 표시
+    # ── 목표 비중 + 월 배분 표시 (항상 고정)
+    st.markdown('<div style="background:#0a0f1a;border:1px solid #1e2a3a;border-radius:10px;padding:.8rem 1rem;margin-bottom:.8rem">',unsafe_allow_html=True)
+    st.markdown('<div style="font-size:.65rem;color:#6b7a99;letter-spacing:2px;margin-bottom:.5rem">📌 목표 포트폴리오 구성</div>',unsafe_allow_html=True)
     wt_cols=st.columns(3)
-    for i,(t,info) in enumerate(TICKERS.items()):
+    wt_data=[
+        ("GOOGL","Alphabet",  .30,"#4fa3e0",600, "월초 고정"),
+        ("IREN", "IREN Ltd",  .50,"#c9a84c",1000,"신호 타이밍"),
+        ("MU",   "Micron",    .20,"#3ecf8e",200, "월초 고정+α"),
+    ]
+    for i,(t,name,wt,col,base,timing) in enumerate(wt_data):
         cur_w=cw.get(t,0)*100
-        tgt_w=info["weight"]*100
+        tgt_w=wt*100
         diff=cur_w-tgt_w
-        diff_c="#e05c5c" if abs(diff)>5 else "#c9a84c" if abs(diff)>2 else "#3ecf8e"
+        has_data=pv>0
         with wt_cols[i]:
-            st.markdown(f'''<div style="background:#0f1620;border:1px solid {info["color"]}44;border-top:3px solid {info["color"]};border-radius:8px;padding:.7rem;text-align:center;margin-bottom:.5rem">
-  <div style="font-family:Cinzel,serif;font-size:1rem;color:{info["color"]}">{t}</div>
-  <div style="font-size:1.5rem;font-weight:700;color:#e8e6f0;font-family:Cinzel,serif">{tgt_w:.0f}%</div>
-  <div style="font-size:.68rem;color:#6b7a99">목표비중</div>
-  <div style="font-size:.72rem;color:{diff_c};margin-top:.2rem">현재 {cur_w:.1f}% ({diff:+.1f}%)</div>
+            diff_txt=f"현재 {cur_w:.1f}% ({diff:+.1f}%)" if has_data else "매매일지 입력 후 표시"
+            diff_c="#e05c5c" if has_data and abs(diff)>5 else "#c9a84c" if has_data and abs(diff)>2 else "#6b7a99"
+            st.markdown(f'''<div style="border-left:3px solid {col};padding:.4rem .6rem">
+  <div style="display:flex;justify-content:space-between;align-items:baseline">
+    <span style="font-family:Cinzel,serif;font-size:1.1rem;color:{col}">{t}</span>
+    <span style="font-family:Cinzel,serif;font-size:1.8rem;font-weight:900;color:#e8e6f0">{tgt_w:.0f}%</span>
+  </div>
+  <div style="font-size:.68rem;color:#6b7a99">{name}</div>
+  <div style="display:flex;justify-content:space-between;margin-top:.3rem">
+    <span style="font-size:.7rem;color:{col}">${base:,.0f}/월</span>
+    <span style="font-size:.65rem;color:#6b7a99">{timing}</span>
+  </div>
+  <div style="font-size:.65rem;color:{diff_c};margin-top:.15rem">{diff_txt}</div>
 </div>''',unsafe_allow_html=True)
-
-    st.markdown("<br>",unsafe_allow_html=True)
+    st.markdown('</div>',unsafe_allow_html=True)
 
     c1,c2,c3=st.columns(3)
     with c1:
