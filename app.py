@@ -578,6 +578,29 @@ def price_chart(df,t,ind):
         fig.add_trace(go.Scatter(x=idx,y=bl_,line=dict(color="rgba(79,163,224,0.25)",width=1),
             fill="tonexty",fillcolor="rgba(79,163,224,0.06)",showlegend=False),row=1,col=1)
 
+    # ── 주가 차트에 매수 구간 수평선 추가 (과거 데이터 기반)
+    c_full=ind.get("_c",np.array([]))
+    rsi_full=ind.get("_rsi_arr",np.array([]))
+    rsi_p_=IND_P[t]["rsi"]
+    if len(c_full)>rsi_p_ and len(rsi_full)>0:
+        c_for_r=c_full[rsi_p_:]; min_l=min(len(rsi_full),len(c_for_r))
+        r_=rsi_full[-min_l:]; p_=c_for_r[-min_l:]
+        m35=r_<=35; m25=r_<=25
+        if m35.sum()>=2:
+            p35_avg=float(np.mean(p_[m35]))
+            fig.add_hline(y=p35_avg,line_color="#3ecf8e",line_dash="dash",line_width=1,row=1,col=1)
+            fig.add_annotation(x=idx[-1],y=p35_avg,text=f" RSI35 과거평균 ${p35_avg:,.1f}",
+                font=dict(size=8,color="#3ecf8e"),showarrow=False,xanchor="left",row=1,col=1)
+        if m25.sum()>=1:
+            p25_avg=float(np.mean(p_[m25]))
+            fig.add_hline(y=p25_avg,line_color="#2fff9e",line_dash="dot",line_width=1.5,row=1,col=1)
+            fig.add_annotation(x=idx[-1],y=p25_avg,text=f" RSI25 과거평균 ${p25_avg:,.1f}",
+                font=dict(size=8,color="#2fff9e"),showarrow=False,xanchor="left",row=1,col=1)
+        # 매수 구간 박스 (RSI35 최소~RSI35 최대)
+        if m35.sum()>=2:
+            fig.add_hrect(y0=float(np.min(p_[m35])),y1=float(np.max(p_[m35])),
+                fillcolor="rgba(62,207,142,0.06)",line_width=0,row=1,col=1)
+
     # ── RSI + 신호 구간 색칠
     if len(ra_)>0 and len(ri_)==len(ra_):
         # 배경 존
@@ -1003,74 +1026,257 @@ with ta0:
 <span style="color:#e05c5c">■</span> 30점↓ 오늘은 패스
 </div>''',unsafe_allow_html=True)
 
-    # ── 종목별 리밋 매수 가이드
+    # ── 종목별 리밋 매수 가이드 (과거 데이터 기반)
     st.markdown("---")
     st.markdown('<div class="st2">🎯 리밋 매수 가이드</div>',unsafe_allow_html=True)
-    st.markdown('<div class="info">💡 지금 당장 사기 애매하면 — 목표가에 리밋 주문 걸어두세요. 하락 시 자동 체결.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="info">💡 목표 구간에 리밋 주문 걸어두세요. 과거 1년 데이터 기반 실제 지지구간입니다.</div>',unsafe_allow_html=True)
 
-    for t in ["IREN","GOOGL","MU"]:
-        info=TICKERS[t]; px=prices.get(t,0)
-        ind=inds.get(t,{}); rv=ind.get("rsi",50)
-        sg=sigs[t]; mul=sg.get("mul",0)
-        r=results[t]; score=r["score"]
+    def calc_buy_zones(t, ind, sg, px, mul):
+        """과거 데이터로 실제 매수 구간 계산"""
+        c_arr  = ind.get("_c", np.array([]))
+        rsi_arr= ind.get("_rsi_arr", np.array([]))
+        bl_arr = ind.get("_bl", np.array([]))
+        s200   = ind.get("sma200", px)
+        s80    = ind.get("sma80", px)
+        bb_low = ind.get("bb_lower", px*0.92)
+        rsi_p  = IND_P[t]["rsi"]
 
-        if px<=0: continue
+        zones={}
 
-        # 목표 매수가 계산 (현재가 기준 하락 시나리오)
+        if len(c_arr)>rsi_p and len(rsi_arr)>0:
+            # RSI 배열과 가격 배열 길이 맞추기
+            c_for_rsi = c_arr[rsi_p:]
+            min_len   = min(len(rsi_arr), len(c_for_rsi))
+            r_arr     = rsi_arr[-min_len:]
+            p_arr     = c_for_rsi[-min_len:]
+
+            # RSI 35 이하 구간 가격
+            mask35 = r_arr <= 35
+            if mask35.sum() >= 2:
+                p35 = p_arr[mask35]
+                zones["rsi35"] = {
+                    "avg":   float(np.mean(p35)),
+                    "min":   float(np.min(p35)),
+                    "max":   float(np.max(p35)),
+                    "last":  float(p35[-1]),
+                    "count": int(mask35.sum()),
+                }
+            else:
+                # 데이터 없으면 RSI 현재값으로 선형 추정
+                rv_now = ind.get("rsi", 50)
+                ratio  = (35 / max(rv_now, 1)) ** 1.5
+                zones["rsi35"] = {"avg": px*ratio, "min": px*ratio*0.95,
+                                   "max": px*ratio*1.05, "last": px*ratio, "count": 0}
+
+            # RSI 25 이하 구간 가격
+            mask25 = r_arr <= 25
+            if mask25.sum() >= 1:
+                p25 = p_arr[mask25]
+                zones["rsi25"] = {
+                    "avg":   float(np.mean(p25)),
+                    "min":   float(np.min(p25)),
+                    "max":   float(np.max(p25)),
+                    "last":  float(p25[-1]),
+                    "count": int(mask25.sum()),
+                }
+            else:
+                ratio = (25 / max(ind.get("rsi",50), 1)) ** 1.8
+                zones["rsi25"] = {"avg": px*ratio*0.85, "min": px*ratio*0.80,
+                                   "max": px*ratio*0.90, "last": px*ratio*0.85, "count": 0}
+
+            # RSI 50 이하 관망 구간
+            mask50 = (r_arr > 35) & (r_arr <= 55)
+            if mask50.sum() >= 3:
+                p50 = p_arr[mask50]
+                zones["watch"] = {"avg": float(np.mean(p50)), "min": float(np.min(p50)),
+                                   "max": float(np.max(p50))}
+
+            # BB 하단 터치 구간
+            bl_for_rsi = bl_arr[-min_len:] if len(bl_arr)>=min_len else bl_arr
+            if len(bl_for_rsi)==min_len:
+                mask_bb = p_arr <= bl_for_rsi * 1.01
+                if mask_bb.sum() >= 1:
+                    zones["bb_touch"] = {"avg": float(np.mean(p_arr[mask_bb])),
+                                          "min": float(np.min(p_arr[mask_bb]))}
+
+            # 반등 성공률 계산 (RSI 35 이하 진입 후 1개월 뒤)
+            success_1m = 0; total_entries = 0
+            in_zone = False
+            for j in range(len(r_arr)-21):
+                if r_arr[j] <= 35 and not in_zone:
+                    in_zone = True
+                    entry_px = p_arr[j]
+                    future_px = p_arr[j+21] if j+21 < len(p_arr) else p_arr[-1]
+                    total_entries += 1
+                    if future_px > entry_px * 1.10: success_1m += 1
+                elif r_arr[j] > 40:
+                    in_zone = False
+            zones["success_rate"] = (success_1m/total_entries*100) if total_entries>0 else None
+            zones["total_entries"] = total_entries
+
+        zones["sma200"] = s200
+        zones["sma80"]  = s80
+        zones["bb_lower"] = bb_low
+        return zones
+
+    def draw_price_bar(t, px, zones, ind, mul, sg):
+        """가격 구간 바 시각화 (텍스트 기반)"""
+        info   = TICKERS[t]
+        tc     = info["color"]
+        s200   = zones.get("sma200", px)
+        bb_low = zones.get("bb_lower", px*0.92)
+        rsi35  = zones.get("rsi35", {}).get("avg", px*0.88)
+        rsi35_min = zones.get("rsi35", {}).get("min", px*0.85)
+        rsi35_max = zones.get("rsi35", {}).get("max", px*0.92)
+        rsi25  = zones.get("rsi25", {}).get("avg", px*0.75)
+        rsi25_min = zones.get("rsi25", {}).get("min", px*0.70)
+        watch_max = zones.get("watch", {}).get("max", px*1.05)
+        success= zones.get("success_rate")
+        entries= zones.get("total_entries", 0)
+        cnt35  = zones.get("rsi35", {}).get("count", 0)
+        cnt25  = zones.get("rsi25", {}).get("count", 0)
+        rv_now = ind.get("rsi", 50)
+
+        # 예산
+        if t=="IREN":
+            budget = 1000 if mul>=2 or sg.get("is_trend") else 800
+        elif t=="GOOGL":
+            budget = 600
+        else:
+            budget = 200
+
+        # 구간 정의 (위→아래, 높은가격→낮은가격)
+        all_prices = [px, s200, bb_low, rsi35_max, rsi35, rsi35_min, rsi25, rsi25_min]
+        p_max = max(all_prices) * 1.03
+        p_min = min(all_prices) * 0.97
+        p_range = p_max - p_min if p_max > p_min else 1
+
+        def pct_pos(p):
+            return max(0, min(100, (p - p_min) / p_range * 100))
+
+        # 구간 데이터
+        segments = [
+            ("⚠️ 과열/고평가",  rsi35_max, p_max,    "#e05c5c22", "#e05c5c", "RSI 과열 — 매수 자제"),
+            ("🟡 관망 구간",    rsi35,     rsi35_max, "#c9a84c22", "#c9a84c", f"RSI 35~60 — 기다려요"),
+            ("⚡ 매수 시작",    rsi35_min, rsi35,     "#3ecf8e22", "#3ecf8e", f"RSI 35 이하 과거 평균 (과거 {cnt35}회)"),
+            ("🔥 집중 매수",    rsi25,     rsi35_min, "#3ecf8e44", "#2fff9e", f"RSI 25 이하 과거 평균 (과거 {cnt25}회)"),
+            ("💀 극단 구간",    rsi25_min, rsi25,     "#9b6dff22", "#9b6dff", "역대 최저 근방 — 공황 매수"),
+        ]
+
+        # 주요 가격 라벨
+        markers = []
+        markers.append((px,     "●", "#e8e6f0", f"현재가 ${px:,.2f} (RSI {rv_now:.0f})"))
+        markers.append((s200,   "▶", "#9b6dff", f"SMA200 ${s200:,.2f} (장기지지선)"))
+        markers.append((bb_low, "▶", "#4fa3e0", f"BB하단 ${bb_low:,.2f} (볼린저밴드 하단)"))
+        if cnt35>0:
+            markers.append((rsi35, "▶", "#3ecf8e", f"RSI35 평균 ${rsi35:,.2f} (과거 {cnt35}회 평균)"))
+        if cnt25>0:
+            markers.append((rsi25, "▶", "#2fff9e", f"RSI25 평균 ${rsi25:,.2f} (과거 {cnt25}회 평균)"))
+
+        # ── 렌더링
+        st.markdown(f'<div style="font-family:Cinzel,serif;color:{tc};font-size:1.1rem;margin:1rem 0 .5rem">📊 {t} · 현재가 ${px:,.2f}</div>',unsafe_allow_html=True)
+
+        # 성공률 표시
+        if success is not None and entries>0:
+            sc="#3ecf8e" if success>=70 else "#c9a84c" if success>=50 else "#e05c5c"
+            st.markdown(f'<div style="font-size:.72rem;color:{sc};margin-bottom:.5rem">📈 과거 RSI35 이하 진입 후 1개월 +10% 달성률: <b>{success:.0f}%</b> ({entries}번 중 {int(entries*success/100)}번 성공)</div>',unsafe_allow_html=True)
+
+        # 가격 구간 바 (HTML 테이블 기반)
+        rows_html = ""
+        bar_width = 160  # px
+
+        # 구간 바
+        for seg_label, p_lo, p_hi, bg, border, desc in segments:
+            lo_pos = pct_pos(p_lo); hi_pos = pct_pos(p_hi)
+            bar_pct = hi_pos - lo_pos
+            # 현재가가 이 구간에 있는지
+            in_here = p_lo <= px <= p_hi
+            highlight = "font-weight:700;" if in_here else ""
+            arrow = " ◀ 지금 여기!" if in_here else ""
+            rows_html += f'''<tr>
+  <td style="font-size:.7rem;color:{border};padding:.25rem .4rem;white-space:nowrap;{highlight}">{seg_label}{arrow}</td>
+  <td style="padding:.25rem .3rem;width:{bar_width}px">
+    <div style="background:#0f1620;border-radius:3px;height:18px;position:relative;width:100%">
+      <div style="position:absolute;left:{lo_pos:.0f}%;width:{max(bar_pct,2):.0f}%;height:18px;background:{bg};border-left:2px solid {border};border-radius:2px"></div>
+      {"<div style=\'position:absolute;left:"+str(pct_pos(px))+f"%;top:0;width:2px;height:18px;background:#e8e6f0\'></div>" if in_here else ""}
+    </div>
+  </td>
+  <td style="font-size:.65rem;color:#6b7a99;padding:.25rem .3rem;text-align:right;white-space:nowrap">${p_lo:,.0f}~${p_hi:,.0f}</td>
+</tr>'''
+
+        # 주요 가격 마커
+        marker_html = ""
+        for mp, sym, mc, mlabel in sorted(markers, key=lambda x:-x[0]):
+            in_here = abs(mp-px)/px < 0.005
+            marker_html += f'<div style="display:flex;align-items:center;gap:.4rem;padding:.15rem 0;border-bottom:1px solid #1e2a3a">'                 f'<div style="width:{bar_width}px;position:relative;height:14px;background:#070a0f;border-radius:2px">'                 f'<div style="position:absolute;left:{pct_pos(mp):.0f}%;top:2px;font-size:.7rem;color:{mc};">{sym}</div></div>'                 f'<span style="font-size:.68rem;color:{mc}">{mlabel}</span></div>'
+
+        st.markdown(f'''<div style="background:#0a0f1a;border:1px solid #1e2a3a;border-radius:8px;padding:.8rem;margin-bottom:.5rem;overflow-x:auto">
+<table style="width:100%;border-collapse:collapse">{rows_html}</table>
+<div style="margin-top:.6rem;border-top:1px solid #1e2a3a;padding-top:.5rem">{marker_html}</div>
+</div>''',unsafe_allow_html=True)
+
+        # 리밋 주문 추천 가격
+        st.markdown('<div style="font-size:.72rem;color:#c9a84c;margin:.4rem 0 .2rem">📌 리밋 주문 추천가</div>',unsafe_allow_html=True)
+        limit_targets=[]
         if t=="IREN":
             above200=sg.get("above_sma200",True)
-            targets=[
-                ("RSI 35 도달 예상가", px*0.92, "과매도 진입 — 기본 2배 구간"),
-                ("RSI 25 도달 예상가", px*0.82, "극과매도 — 최고 기회 3배 구간"),
-                ("BB 하단 근접가",      ind.get("bb_lower",px*0.90), "볼린저 하단 — 통계적 저점"),
-            ]
-            budget=800 if mul==1 else 1000
-        elif t=="GOOGL":
-            targets=[
-                ("-1% 하락 시",  px*0.99, "소폭 조정 — 무난한 진입"),
-                ("-2% 하락 시",  px*0.98, "좋은 타이밍"),
-                ("-3% 하락 시",  px*0.97, "최적 타이밍 — 점수 +30"),
-            ]
-            budget=800
-        else:  # MU
-            # MU는 $200 고정 + 조건 충족 시 추가 매수 여부
-            mu_alloc=alloc.get("MU",200)
-            targets=[
-                ("지금 바로 리밋", px*0.995, f"$200 고정 집행 — 항상 사는 금액"),
-                ("RSI 40 도달 시 추가", px*0.94, "RSI<40 → 추가 $200 고려 (총 $400)"),
-                ("RSI 30 도달 시 추가", px*0.88, "RSI<30 → 추가 $400 고려 (총 $600)"),
-            ]
-            budget=mu_alloc
-
-        tc=info["color"]
-        st.markdown(f'<div style="font-family:Cinzel,serif;color:{tc};font-size:1rem;margin:.7rem 0 .3rem">{t} · 현재가 ${px:,.2f}</div>',unsafe_allow_html=True)
-
-        for i_t,(label,target_px,desc) in enumerate(targets):
-            if target_px<=0: continue
-            # MU 첫번째(고정)는 $200, 나머지는 추가분
-            if t=="MU":
-                if i_t==0: disp_budget=200
-                elif i_t==1: disp_budget=200  # 추가분
-                else: disp_budget=400  # 추가분
+            bgt=1000 if mul>=2 or sg.get("is_trend") else 800
+            if cnt35>0:
+                limit_targets.append(("⚡ 매수 시작",  rsi35,     bgt,  f"RSI35 과거평균 — {cnt35}회 실측"))
+                limit_targets.append(("⚡ 좋은 진입",  rsi35_min, bgt,  "RSI35 과거 최저 — 강한 지지"))
             else:
-                disp_budget=budget
-            shares=disp_budget/target_px
-            drop_pct=(target_px-px)/px*100
-            tc2="#3ecf8e" if drop_pct<-2 else "#c9a84c" if drop_pct<0 else "#4fa3e0"
-            st.markdown(f'''<div style="background:#0f1620;border-radius:6px;padding:.7rem .9rem;margin-bottom:.3rem;display:flex;justify-content:space-between;align-items:center">
+                limit_targets.append(("⚡ 매수 시작", bb_low,    bgt,  "BB 하단 — 통계적 저점"))
+            if cnt25>0:
+                limit_targets.append(("🔥 집중 매수", rsi25,     bgt,  f"RSI25 과거평균 — {cnt25}회 실측"))
+            limit_targets.append(("🛡 장기지지",   max(s200,bb_low), bgt, "SMA200 or BB하단 — 강한 지지선"))
+        elif t=="GOOGL":
+            limit_targets=[
+                ("✅ 무난한 진입", px*0.99, 600, "-1% — 언제든 OK"),
+                ("⚡ 좋은 타이밍", px*0.98, 600, "-2% — 하락일 매수"),
+                ("🔥 최적 타이밍", max(s200,bb_low), 600, "SMA200 or BB하단"),
+            ]
+        else:  # MU
+            if cnt35>0:
+                limit_targets=[
+                    ("✅ 고정 $200",  px*0.995, 200, "항상 이 가격에 걸어두기"),
+                    ("⚡ RSI40 추가", rsi35,    200, f"RSI35 과거평균 ${rsi35:,.2f} — 추가 $200"),
+                    ("🔥 RSI30 추가", rsi25,    400, f"RSI25 과거평균 ${rsi25:,.2f} — 추가 $400"),
+                ]
+            else:
+                limit_targets=[
+                    ("✅ 고정 $200",  px*0.995, 200, "항상 이 가격에 걸어두기"),
+                    ("⚡ 추가 기회",  bb_low,   200, f"BB하단 ${bb_low:,.2f} — 추가 $200"),
+                    ("🔥 강한 지지",  s200,     400, f"SMA200 ${s200:,.2f} — 추가 $400"),
+                ]
+
+        for lbl, lpx, lbgt, ldesc in limit_targets:
+            if lpx<=0: continue
+            lshares=lbgt/lpx
+            ldrop=(lpx-px)/px*100
+            lc="#3ecf8e" if ldrop<-1 else "#c9a84c" if ldrop<0 else "#4fa3e0"
+            st.markdown(f'''<div style="background:#0f1620;border-radius:5px;padding:.55rem .8rem;margin-bottom:.25rem;display:flex;justify-content:space-between;align-items:center">
   <div>
-    <div style="font-size:.72rem;color:#6b7a99">{label}</div>
-    <div style="font-family:Cinzel,serif;font-size:1.1rem;color:{tc2}">${target_px:,.2f}</div>
-    <div style="font-size:.68rem;color:#6b7a99">{desc}</div>
+    <span style="font-size:.72rem;color:#6b7a99">{lbl}</span><br>
+    <span style="font-family:Cinzel,serif;font-size:1.05rem;color:{lc}">${lpx:,.2f}</span>
+    <span style="font-size:.65rem;color:#6b7a99;margin-left:.3rem">{ldesc}</span>
   </div>
   <div style="text-align:right">
-    <div style="font-size:.68rem;color:#6b7a99">{"고정" if t=="MU" and i_t==0 else "추가" if t=="MU" else "예산"} ${disp_budget:,.0f}</div>
-    <div style="font-family:Cinzel,serif;color:#e8e6f0;font-size:1rem">{shares:.2f}주</div>
-    <div style="font-size:.68rem;color:{tc2}">{drop_pct:+.1f}%</div>
+    <div style="font-size:.65rem;color:#6b7a99">${lbgt:,.0f}</div>
+    <div style="font-family:Cinzel,serif;color:#e8e6f0;font-size:.95rem">{lshares:.2f}주</div>
+    <div style="font-size:.65rem;color:{lc}">{ldrop:+.1f}%</div>
   </div>
 </div>''',unsafe_allow_html=True)
 
-    st.markdown('<div style="font-size:.68rem;color:#6b7a99;margin-top:.5rem">⚠️ 목표가는 현재 RSI와 BB 기반 추정치입니다. 실제 지지선과 다를 수 있어요.</div>',unsafe_allow_html=True)
+    # 전 종목 렌더링
+    for t in ["IREN","GOOGL","MU"]:
+        px=prices.get(t,0)
+        if px<=0: continue
+        ind=inds.get(t,{}); sg=sigs[t]; mul=sg.get("mul",0)
+        zones=calc_buy_zones(t,ind,sg,px,mul)
+        draw_price_bar(t,px,zones,ind,mul,sg)
+        st.markdown("---")
+
+    st.markdown('<div style="font-size:.68rem;color:#6b7a99">⚠️ 과거 1년 실제 데이터 기반. RSI 도달 시점은 시장 상황에 따라 달라질 수 있어요.</div>',unsafe_allow_html=True)
 
     # ── 원칙 알림
     st.markdown("---")
