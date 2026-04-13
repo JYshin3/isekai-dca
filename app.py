@@ -862,7 +862,18 @@ with ta0:
         bar_color="#2fff9e" if score>=85 else "#3ecf8e" if score>=65 else "#c9a84c" if score>=45 else "#e05c5c"
         score_bar=f'<div style="background:#0f1620;border-radius:4px;height:6px;margin:.3rem 0"><div style="width:{score}%;height:6px;background:{bar_color};border-radius:4px"></div></div>'
 
-        amt_display=f"${amt:,.0f}" if amt>0 else "—"
+        # 카드 금액: 종목별 기본 배정액 표시 (GOOGL은 $800 고정, IREN은 신호 기반)
+        base_amt=TICKERS[t]["base"]  # GOOGL:800, IREN:800, MU:200
+        if t=="IREN":
+            if mul>=2: card_amt=1000
+            elif mul==1 and sg.get("is_trend",False): card_amt=1000
+            elif mul==1: card_amt=800
+            else: card_amt=0
+        elif t=="MU":
+            card_amt=alloc.get("MU",200)  # MU는 보너스 포함 실제값
+        else:
+            card_amt=800  # GOOGL 항상 $800
+        amt_display=f"${card_amt:,.0f}" if card_amt>0 else "STOP"
         mul_display=f"{mul}×" if mul>0 else "STOP"
 
         st.markdown(f'''<div style="background:{bg};border-left:{bw} solid {border};border:1px solid {border}44;border-left:{bw} solid {border};border-radius:10px;padding:1.2rem 1.1rem;margin-bottom:.8rem">
@@ -889,11 +900,11 @@ with ta0:
   <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
     <span style="font-size:.72rem;color:#6b7a99;white-space:nowrap">타이밍 점수</span>
     <div style="flex:1;background:#0f1620;border-radius:4px;height:8px"><div style="width:{score}%;height:8px;background:{bar_color};border-radius:4px"></div></div>
-    <span style="font-family:Cinzel,serif;font-size:1rem;color:{bar_color};font-weight:700;min-width:2.5rem;text-align:right">{score}점</span>
+    <span style="font-family:Cinzel,serif;font-size:1rem;color:{bar_color};font-weight:700;min-width:3.5rem;text-align:right">{score}<span style="font-size:.65rem;color:#6b7a99">/100</span></span>
   </div>''',unsafe_allow_html=True)
 
         # 점수 이유 (펼치기)
-        with st.expander(f"  {t} 점수 상세 ({score}점)"):
+        with st.expander(f"  {t} 점수 상세 ({score}/100점)"):
             for reason in r["reasons"]:
                 color="#3ecf8e" if "+" in reason and "-" not in reason.split("+")[0] else "#e05c5c" if "-" in reason else "#6b7a99"
                 st.markdown(f'<div style="font-size:.72rem;color:{color};padding:.15rem 0">• {reason}</div>',unsafe_allow_html=True)
