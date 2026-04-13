@@ -931,6 +931,110 @@ with ta0:
 
         st.markdown("",unsafe_allow_html=True)
 
+    # ── 점수 기준표
+    st.markdown("---")
+    with st.expander("📊 타이밍 점수 기준표 보기"):
+        st.markdown('''<table style="width:100%;font-size:.75rem">
+<tr><th style="text-align:left">점수</th><th style="text-align:left">판정</th><th style="text-align:left">주요 조건</th><th style="text-align:right">배점</th></tr>
+<tr><td colspan="4" style="color:#c9a84c;padding-top:.5rem"><b>📉 당일 변동률</b></td></tr>
+<tr><td>-3% 이상 하락</td><td style="color:#3ecf8e">최고</td><td>오늘 크게 빠진 날</td><td style="text-align:right;color:#3ecf8e">+30</td></tr>
+<tr><td>-1.5% 하락</td><td style="color:#3ecf8e">좋음</td><td>소폭 하락</td><td style="text-align:right;color:#3ecf8e">+20</td></tr>
+<tr><td>-0.5% 하락</td><td style="color:#3ecf8e">무난</td><td>약보합</td><td style="text-align:right;color:#3ecf8e">+10</td></tr>
+<tr><td>+2% 이상 상승</td><td style="color:#e05c5c">나쁨</td><td>이미 많이 오름</td><td style="text-align:right;color:#e05c5c">-15</td></tr>
+<tr><td colspan="4" style="color:#c9a84c;padding-top:.5rem"><b>📊 RSI 위치</b></td></tr>
+<tr><td>RSI &lt; 30</td><td style="color:#3ecf8e">최고</td><td>극과매도</td><td style="text-align:right;color:#3ecf8e">+25</td></tr>
+<tr><td>RSI &lt; 40</td><td style="color:#3ecf8e">좋음</td><td>과매도</td><td style="text-align:right;color:#3ecf8e">+20</td></tr>
+<tr><td>RSI &lt; 50</td><td style="color:#3ecf8e">무난</td><td>중립 하단</td><td style="text-align:right;color:#3ecf8e">+10</td></tr>
+<tr><td>RSI &gt; 70</td><td style="color:#e05c5c">나쁨</td><td>과열</td><td style="text-align:right;color:#e05c5c">-20</td></tr>
+<tr><td>RSI &gt; 60</td><td style="color:#e08c3c">주의</td><td>상단</td><td style="text-align:right;color:#e08c3c">-10</td></tr>
+<tr><td colspan="4" style="color:#c9a84c;padding-top:.5rem"><b>📈 볼린저밴드</b></td></tr>
+<tr><td>BB 하단 터치</td><td style="color:#3ecf8e">최고</td><td>통계적 저평가</td><td style="text-align:right;color:#3ecf8e">+20</td></tr>
+<tr><td>BB 하단 3% 이내</td><td style="color:#3ecf8e">좋음</td><td>하단 근접</td><td style="text-align:right;color:#3ecf8e">+12</td></tr>
+<tr><td colspan="4" style="color:#c9a84c;padding-top:.5rem"><b>📅 요일 · 시기</b></td></tr>
+<tr><td>월요일</td><td style="color:#3ecf8e">좋음</td><td>주초 약세 경향</td><td style="text-align:right;color:#3ecf8e">+15</td></tr>
+<tr><td>화요일</td><td style="color:#3ecf8e">무난</td><td></td><td style="text-align:right;color:#3ecf8e">+10</td></tr>
+<tr><td>10~20일</td><td style="color:#3ecf8e">무난</td><td>월중 약세 경향</td><td style="text-align:right;color:#3ecf8e">+10</td></tr>
+<tr><td colspan="4" style="color:#c9a84c;padding-top:.5rem"><b>⚠️ IREN 전용</b></td></tr>
+<tr><td>SMA200 아래</td><td style="color:#e05c5c">위험</td><td>하락추세</td><td style="text-align:right;color:#e05c5c">-15</td></tr>
+<tr><td>MACD 상승</td><td style="color:#3ecf8e">좋음</td><td>모멘텀 회복</td><td style="text-align:right;color:#3ecf8e">+5</td></tr>
+</table>
+<div style="margin-top:.8rem;font-size:.72rem">
+<span style="color:#2fff9e">■</span> 85점↑ 오늘이 최적! &nbsp;
+<span style="color:#3ecf8e">■</span> 65~85점 오늘 사세요 &nbsp;
+<span style="color:#c9a84c">■</span> 45~65점 내일이 나을 수도 &nbsp;
+<span style="color:#c9a84c">■</span> 30~45점 기다려요 &nbsp;
+<span style="color:#e05c5c">■</span> 30점↓ 오늘은 패스
+</div>''',unsafe_allow_html=True)
+
+    # ── 종목별 리밋 매수 가이드
+    st.markdown("---")
+    st.markdown('<div class="st2">🎯 리밋 매수 가이드</div>',unsafe_allow_html=True)
+    st.markdown('<div class="info">💡 지금 당장 사기 애매하면 — 목표가에 리밋 주문 걸어두세요. 하락 시 자동 체결.</div>',unsafe_allow_html=True)
+
+    for t in ["IREN","GOOGL","MU"]:
+        info=TICKERS[t]; px=prices.get(t,0)
+        ind=inds.get(t,{}); rv=ind.get("rsi",50)
+        sg=sigs[t]; mul=sg.get("mul",0)
+        r=results[t]; score=r["score"]
+
+        if px<=0: continue
+
+        # 목표 매수가 계산 (현재가 기준 하락 시나리오)
+        if t=="IREN":
+            above200=sg.get("above_sma200",True)
+            targets=[
+                ("RSI 35 도달 예상가", px*0.92, "과매도 진입 — 기본 2배 구간"),
+                ("RSI 25 도달 예상가", px*0.82, "극과매도 — 최고 기회 3배 구간"),
+                ("BB 하단 근접가",      ind.get("bb_lower",px*0.90), "볼린저 하단 — 통계적 저점"),
+            ]
+            budget=800 if mul==1 else 1000
+        elif t=="GOOGL":
+            targets=[
+                ("-1% 하락 시",  px*0.99, "소폭 조정 — 무난한 진입"),
+                ("-2% 하락 시",  px*0.98, "좋은 타이밍"),
+                ("-3% 하락 시",  px*0.97, "최적 타이밍 — 점수 +30"),
+            ]
+            budget=800
+        else:  # MU
+            # MU는 $200 고정 + 조건 충족 시 추가 매수 여부
+            mu_alloc=alloc.get("MU",200)
+            targets=[
+                ("지금 바로 리밋", px*0.995, f"$200 고정 집행 — 항상 사는 금액"),
+                ("RSI 40 도달 시 추가", px*0.94, "RSI<40 → 추가 $200 고려 (총 $400)"),
+                ("RSI 30 도달 시 추가", px*0.88, "RSI<30 → 추가 $400 고려 (총 $600)"),
+            ]
+            budget=mu_alloc
+
+        tc=info["color"]
+        st.markdown(f'<div style="font-family:Cinzel,serif;color:{tc};font-size:1rem;margin:.7rem 0 .3rem">{t} · 현재가 ${px:,.2f}</div>',unsafe_allow_html=True)
+
+        for i_t,(label,target_px,desc) in enumerate(targets):
+            if target_px<=0: continue
+            # MU 첫번째(고정)는 $200, 나머지는 추가분
+            if t=="MU":
+                if i_t==0: disp_budget=200
+                elif i_t==1: disp_budget=200  # 추가분
+                else: disp_budget=400  # 추가분
+            else:
+                disp_budget=budget
+            shares=disp_budget/target_px
+            drop_pct=(target_px-px)/px*100
+            tc2="#3ecf8e" if drop_pct<-2 else "#c9a84c" if drop_pct<0 else "#4fa3e0"
+            st.markdown(f'''<div style="background:#0f1620;border-radius:6px;padding:.7rem .9rem;margin-bottom:.3rem;display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <div style="font-size:.72rem;color:#6b7a99">{label}</div>
+    <div style="font-family:Cinzel,serif;font-size:1.1rem;color:{tc2}">${target_px:,.2f}</div>
+    <div style="font-size:.68rem;color:#6b7a99">{desc}</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:.68rem;color:#6b7a99">{"고정" if t=="MU" and i_t==0 else "추가" if t=="MU" else "예산"} ${disp_budget:,.0f}</div>
+    <div style="font-family:Cinzel,serif;color:#e8e6f0;font-size:1rem">{shares:.2f}주</div>
+    <div style="font-size:.68rem;color:{tc2}">{drop_pct:+.1f}%</div>
+  </div>
+</div>''',unsafe_allow_html=True)
+
+    st.markdown('<div style="font-size:.68rem;color:#6b7a99;margin-top:.5rem">⚠️ 목표가는 현재 RSI와 BB 기반 추정치입니다. 실제 지지선과 다를 수 있어요.</div>',unsafe_allow_html=True)
+
     # ── 원칙 알림
     st.markdown("---")
     month_plan=sum(alloc.values())
