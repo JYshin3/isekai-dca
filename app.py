@@ -328,7 +328,7 @@ def allocate(sigs):
     2단계 분할 집행 전략:
     ─────────────────────────────────────
     1차 집행 (월초 즉시, ~$1,000):
-      GOOGL $800 고정
+      GOOGL $600 고정
       MU    $200 최소 보장
     ─────────────────────────────────────
     2차 집행 (월중 IREN 최적 타이밍, ~$1,000):
@@ -831,7 +831,7 @@ with ta0:
     wt_data=[
         ("GOOGL","Alphabet",  .30,"#4fa3e0",600, "월초 고정"),
         ("IREN", "IREN Ltd",  .50,"#c9a84c",1000,"신호 타이밍"),
-        ("MU",   "Micron",    .20,"#3ecf8e",200, "월초 고정+α"),
+        ("MU",   "Micron",    .20,"#3ecf8e",400, "월초 $200+신호 추가"),
     ]
     for i,(t,name,wt,col,base,timing) in enumerate(wt_data):
         cur_w=cw.get(t,0)*100
@@ -893,7 +893,7 @@ with ta0:
         bar_color="#2fff9e" if score>=85 else "#3ecf8e" if score>=65 else "#c9a84c" if score>=45 else "#e05c5c"
         score_bar=f'<div style="background:#0f1620;border-radius:4px;height:6px;margin:.3rem 0"><div style="width:{score}%;height:6px;background:{bar_color};border-radius:4px"></div></div>'
 
-        # 카드 금액: 종목별 기본 배정액 표시 (GOOGL은 $800 고정, IREN은 신호 기반)
+        # 카드 금액: 종목별 기본 배정액 표시 (GOOGL은 $600 고정, IREN은 신호 기반)
         base_amt=TICKERS[t]["base"]  # GOOGL:800, IREN:800, MU:200
         if t=="IREN":
             if mul>=2: card_amt=1000
@@ -903,7 +903,7 @@ with ta0:
         elif t=="MU":
             card_amt=alloc.get("MU",200)  # MU는 보너스 포함 실제값
         else:
-            card_amt=800  # GOOGL 항상 $800
+            card_amt=600  # GOOGL 항상 $600
         amt_display=f"${card_amt:,.0f}" if card_amt>0 else "STOP"
         mul_display=f"{mul}×" if mul>0 else "STOP"
 
@@ -1096,7 +1096,7 @@ with ta0:
         st.markdown(f'''<div style="background:#0a1a2a;border:1px solid #4fa3e044;border-left:3px solid #4fa3e0;border-radius:8px;padding:.9rem">
   <div style="font-size:.65rem;color:#4fa3e0;letter-spacing:2px;margin-bottom:.3rem">1차 집행 · 월초 즉시</div>
   <div style="font-family:Cinzel,serif;font-size:1.4rem;color:#e8e6f0">${first_exec:,.0f}</div>
-  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $800 + MU $200<br>신호 무관 고정 집행</div>
+  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $600 + MU $200<br>신호 무관 고정 집행</div>
 </div>''',unsafe_allow_html=True)
     with cc2:
         iren_rdy=alloc.get("IREN",0)>0
