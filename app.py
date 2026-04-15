@@ -456,27 +456,43 @@ def calc_portfolio_from_trades(trades, prices):
     total_invested = sum(h["total_cost"] for h in holdings.values())
     return holdings, total_invested, start_date
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def fetch(t,period="1y"):
-    # 1차: period 그대로 시도
-    for attempt_period in [period,"6mo","3mo"]:
+    """
+    안정적 데이터 수집:
+    - Ticker.history() 우선 (더 안정적)
+    - yf.download() 폴백
+    - 3회 재시도
+    - 실패 시 빈 DataFrame
+    """
+    import time
+    for attempt in range(3):
+        # 1순위: Ticker.history (더 안정적)
         try:
-            df=yf.download(t,period=attempt_period,progress=False,
+            tk=yf.Ticker(t)
+            df=tk.history(period=period,auto_adjust=True)
+            if not df.empty and len(df)>=30:
+                # 컬럼명 정리
+                df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+                needed={"Open","High","Low","Close","Volume"}
+                if needed.issubset(df.columns):
+                    return df
+        except: pass
+
+        # 2순위: yf.download
+        try:
+            df=yf.download(t,period=period,progress=False,
                            auto_adjust=True,threads=False)
-            if df.empty: continue
-            df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
-            needed={"Open","High","Low","Close","Volume"}
-            if not needed.issubset(df.columns): continue
-            if len(df)<10: continue
-            return df
-        except: continue
-    # 2차: Ticker 객체로 재시도
-    try:
-        tk=yf.Ticker(t)
-        df=tk.history(period=period,auto_adjust=True)
-        if not df.empty and len(df)>=10:
-            return df
-    except: pass
+            if not df.empty and len(df)>=30:
+                df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+                needed={"Open","High","Low","Close","Volume"}
+                if needed.issubset(df.columns):
+                    return df
+        except: pass
+
+        if attempt<2:
+            time.sleep(1)  # 재시도 전 대기
+
     return pd.DataFrame()
 
 @st.cache_data(ttl=1800)  # 30분 캐시
@@ -718,8 +734,21 @@ with st.spinner("시장 데이터 로딩 중..."):
             ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
         else:
             inds[t]={}; prices[t]=0; failed_tickers.append(t)
+
+    # 실패한 종목 캐시 삭제 후 재시도 1회
     if failed_tickers:
-        st.warning(f"⚠️ 데이터 로드 실패: {', '.join(failed_tickers)} — 사이드바 새로고침 버튼을 눌러주세요")
+        fetch.clear()
+        import time; time.sleep(2)
+        for t in failed_tickers:
+            df=fetch(t); mdata[t]=df
+            if not df.empty:
+                ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
+                failed_tickers.remove(t)
+            else:
+                inds[t]={}; prices[t]=0
+
+    if failed_tickers:
+        st.warning(f"⚠️ 데이터 로드 실패: {', '.join(failed_tickers)} — 잠시 후 새로고침 해주세요")
     u_auto,u_src=None,"미사용"  # NXE 제외
 
 with st.sidebar:
