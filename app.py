@@ -458,12 +458,26 @@ def calc_portfolio_from_trades(trades, prices):
 
 @st.cache_data(ttl=300)
 def fetch(t,period="1y"):
+    # 1차: period 그대로 시도
+    for attempt_period in [period,"6mo","3mo"]:
+        try:
+            df=yf.download(t,period=attempt_period,progress=False,
+                           auto_adjust=True,threads=False)
+            if df.empty: continue
+            df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+            needed={"Open","High","Low","Close","Volume"}
+            if not needed.issubset(df.columns): continue
+            if len(df)<10: continue
+            return df
+        except: continue
+    # 2차: Ticker 객체로 재시도
     try:
-        df=yf.download(t,period=period,progress=False,auto_adjust=True)
-        if df.empty: return pd.DataFrame()
-        df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
-        return df
-    except: return pd.DataFrame()
+        tk=yf.Ticker(t)
+        df=tk.history(period=period,auto_adjust=True)
+        if not df.empty and len(df)>=10:
+            return df
+    except: pass
+    return pd.DataFrame()
 
 @st.cache_data(ttl=1800)  # 30분 캐시
 def fetch_uranium():
@@ -697,11 +711,15 @@ st.markdown('<div class="hd"><h1>⚔ 이세계 DCA ⚔</h1><p>ADAPTIVE DCA SYSTE
 # 데이터를 sidebar보다 먼저 fetch (sidebar에서 prices 사용하므로)
 with st.spinner("시장 데이터 로딩 중..."):
     mdata,inds,prices={},{},{}
+    failed_tickers=[]
     for t in TICKERS:
         df=fetch(t); mdata[t]=df
         if not df.empty:
             ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
-        else: inds[t]={}; prices[t]=0
+        else:
+            inds[t]={}; prices[t]=0; failed_tickers.append(t)
+    if failed_tickers:
+        st.warning(f"⚠️ 데이터 로드 실패: {', '.join(failed_tickers)} — 사이드바 새로고침 버튼을 눌러주세요")
     u_auto,u_src=None,"미사용"  # NXE 제외
 
 with st.sidebar:
