@@ -843,8 +843,8 @@ with ta0:
         elif is_month_start:
             score+=5; reasons.append(f"{day_of_month}일 월초 +5점")
 
-        # 6. IREN 전용: SMA200 위 여부
-        if t=="IREN" and not above200:
+        # 6. IREN/IONQ 전용: SMA200 위 여부
+        if t in ["IREN","IONQ"] and not above200:
             score-=15; reasons.append("SMA200 아래 -15점 (하락추세)")
 
         # 7. MACD 방향
@@ -938,7 +938,8 @@ with ta0:
     st.markdown("<br>",unsafe_allow_html=True)
 
     # ── 종목별 카드 (IREN 우선)
-    for t in ["IREN","GOOGL","MU"]:
+    for t in ["IREN","IONQ","GOOGL","MU"]:
+        if t not in results: continue
         r=results[t]; info=TICKERS[t]
         score=r["score"]; em=r["em"]; verdict=r["verdict"]
         advice=r["advice"]; amt=r["amt"]; mul=r["mul"]
@@ -1078,7 +1079,7 @@ with ta0:
             st.markdown(f'<div style="font-size:.75rem;color:#e8e6f0;margin-top:.4rem;font-family:Cinzel,serif">합계: <b>{score}점</b> / 100점</div>',unsafe_allow_html=True)
             st.markdown(f'<div style="font-size:.65rem;color:#6b7a99">{["월","화","수","목","금","토","일"][weekday]}요일 · {day_of_month}일 · {"월초" if is_month_start else "월중" if is_mid_month else "기타"}</div>',unsafe_allow_html=True)
 
-        # IREN 전용: SMA200, 불장 조건 표시
+        # IREN/IONQ 전용 추가 정보
         if t=="IREN":
             sg=sigs["IREN"]
             above200=sg.get("above_sma200",True)
