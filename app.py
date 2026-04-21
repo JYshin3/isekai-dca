@@ -1163,7 +1163,7 @@ with ta0:
             sg_q=sigs["IONQ"]
             above200_q=sg_q.get("above_sma200",True)
             s200c_q="#3ecf8e" if above200_q else "#e05c5c"
-            st.markdown(f'<div style="font-size:.72rem;color:{s200c_q};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{"SMA200 위 ✅" if above200_q else "SMA200 아래 ⚠️"} · 양자컴퓨팅 하드웨어 — FTNT 양자보안과 테마 연결</div>',unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:.72rem;color:{s200c_q};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{"SMA200 위 ✅ 상승추세" if above200_q else "SMA200 아래 ⚠️ 하락추세"} · 양자컴퓨팅 — RSI 35 이하 과매도 시 추가 매수 고려</div>',unsafe_allow_html=True)
         st.markdown("",unsafe_allow_html=True)
 
     # ── 점수 기준표
