@@ -49,14 +49,12 @@ td{padding:.55rem .5rem;border-bottom:1px solid #1e2a3a30;}
 # ── CONSTANTS ──
 TICKERS = {
     "IREN": {"name":"IREN Ltd",          "weight":.50,"color":"#c9a84c","base":1000},
-    "MRVL": {"name":"Marvell Technology","weight":.20,"color":"#3ecf8e","base":400},
-    "GOOGL":{"name":"Alphabet",          "weight":.20,"color":"#4fa3e0","base":400},
-    "IONQ": {"name":"IonQ (양자컴퓨팅)", "weight":.10,"color":"#e05c5c","base":200},
+    "GOOGL":{"name":"Alphabet",          "weight":.30,"color":"#4fa3e0","base":600},
+    "IONQ": {"name":"IonQ (양자컴퓨팅)", "weight":.20,"color":"#e05c5c","base":400},
 }
 BUDGET=2000; TARGET=500000; MONTHS=36; PF_FILE=Path("portfolio.json")
 IND_P={
     "IREN": {"rsi":20,"sk":20,"sd":10,"macd":(20,40,9),"bbs":2.5,"atr":20,"adx":20},
-    "MRVL": {"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.0,"atr":14,"adx":14},
     "GOOGL":{"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.0,"atr":14,"adx":14},
     "IONQ": {"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.5,"atr":14,"adx":14},
 }
@@ -172,7 +170,37 @@ def compute(df,p):
     }
 
 # ── SIGNALS ──
-def sg_googl(i): return {"mul":1,"txt":"✅ 고정 매수 (DCA 앵커)","amt":600}
+def sg_googl(i): return {"mul":1,"txt":"✅ 고정 매수 (DCA 앵커)","amt":400}  # 하위호환
+
+def sg_ftnt(i):
+    """
+    FTNT (Fortinet) 신호 — 양자내성보안 + AI 보안 플랫폼
+    보안주는 경기방어적 특성 → 변동성 낮음
+    IREN과 반대 방향으로 움직이는 경우 많아 포트 안정화
+    """
+    rv=i.get("rsi",50); zs=i.get("z_score",0)
+    mh=i.get("macd_hist",0); mhp=i.get("macd_hist_prev",mh)
+    sma200=i.get("sma200",0); px=i.get("price",0)
+    above200=px>sma200 if sma200>0 else True
+
+    # 보안주는 RSI 기준을 조금 넓게 적용 (덜 민감하게)
+    if rv>70:
+        mx,txt=0,f"❌ STOP (RSI {rv:.0f} 과열)"
+    elif rv<35:
+        if above200:
+            mx,txt=2,f"⚡ 과매도 매수 (RSI {rv:.0f} + SMA200 위)"
+        else:
+            mx,txt=1,f"✅ 1배 (RSI {rv:.0f} SMA200 아래 — 신중)"
+    elif rv<50:
+        mx,txt=1,f"✅ 매수구간 (RSI {rv:.0f})"
+    else:
+        mx,txt=1,f"✅ 정기매수 (RSI {rv:.0f})"
+
+    base=400
+    bonus=200 if rv<35 and above200 else 0
+    amt=base+bonus
+
+    return {"mul":mx,"txt":txt,"amt":amt,"above_sma200":above200}
 
 def sg_iren(i):
     rv=i.get("rsi",50); at=i.get("atr",0); ata=i.get("atr_avg",1)
@@ -361,47 +389,29 @@ def sg_ionq(i):
 
 def allocate(sigs):
     """
-    2단계 분할 집행 (4종목):
-    ─────────────────────────────────────
-    1차 집행 (월초 즉시, $900):
-      GOOGL $600 고정
-      MU    $150 최소 보장
-      IONQ  $150 최소 보장
-    ─────────────────────────────────────
-    2차 집행 (월중 타이밍, $1,100):
-      IREN 신호 있음 → IREN 집중
-        1×: $700 / 2×이상or추세: $1,100
-      IREN STOP →
-        MU 보너스 + IONQ 과매도 추가 + 잔액 GOOGL
-    ─────────────────────────────────────
+    2단계 분할 집행 (3종목):
+    1차 (월초): GOOGL $600 + IONQ $200 = $800
+    2차 (타이밍): IREN $1,200 (신호 시)
+      IREN STOP → IONQ 추가 + 잔액 GOOGL
     """
-    iren_sig=sigs.get("IREN",{}); mu_sig=sigs.get("MU",{})
-    ionq_sig=sigs.get("IONQ",{})
+    iren_sig=sigs.get("IREN",{}); ionq_sig=sigs.get("IONQ",{})
     iren_can_buy=(iren_sig.get("mul",0)>0)
 
-    # 1차: 고정 집행
-    # IREN 50%: $1,000, MRVL 20%: $400, GOOGL 20%: $400, IONQ 10%: $200
-    # 단, 월초엔 MRVL+GOOGL+IONQ 고정, IREN은 타이밍
-    mrvl_sig=sigs.get("MRVL",{}); ionq_sig=sigs.get("IONQ",{})
-    a={"IREN":0,"MRVL":400,"GOOGL":400,"IONQ":200}
-    remaining=BUDGET-400-400-200  # $1,000 (IREN 2차 예산)
+    a={"IREN":0,"GOOGL":600,"IONQ":200}
+    remaining=BUDGET-600-200  # $1,200
 
     if iren_can_buy:
         iren_mul=iren_sig.get("mul",1)
         is_trend=iren_sig.get("is_trend",False)
         if iren_mul>=2 or is_trend:
-            iren_get=remaining       # 강한 신호: $1,000 전부
+            iren_get=remaining
         else:
-            iren_get=min(800,remaining)  # 기본 1×: $800
+            iren_get=min(1000,remaining)
         a["IREN"]=iren_get
         leftover=remaining-iren_get
-        if leftover>0:
-            a["GOOGL"]+=leftover
+        if leftover>0: a["GOOGL"]+=leftover
     else:
-        # IREN STOP → MRVL/IONQ 보너스 후 잔액 GOOGL
         rem=remaining
-        mrvl_bonus=max(0,mrvl_sig.get("amt",400)-400)
-        mrvl_extra=min(mrvl_bonus,rem); a["MRVL"]+=mrvl_extra; rem-=mrvl_extra
         ionq_extra=ionq_sig.get("extra_amt",0)
         ionq_add=min(ionq_extra,rem); a["IONQ"]+=ionq_add; rem-=ionq_add
         if rem>0: a["GOOGL"]+=rem
@@ -629,7 +639,8 @@ def price_chart(df,t,ind):
             (70,100,"rgba(224,92,92,0.10)","❌ STOP"),
         ]
         thresholds=[(25,"#2fff9e","25"),(35,"#3ecf8e","35"),(70,"#e05c5c","70")]
-    else:  # GOOGL
+
+    else:
         zones=[]
         thresholds=[]
     fig=make_subplots(
@@ -757,7 +768,7 @@ with st.spinner("시장 데이터 로딩 중..."):
 with st.sidebar:
     st.markdown('<div class="st2">⚙ 설정</div>',unsafe_allow_html=True)
     # 우라늄 자동수집 — 범위 강제 클램프 후 사용
-    earn_mu=st.checkbox("MRVL 실적 발표 후 급락?",value=pf.get("earn_mu",False))
+    earn_mu=st.checkbox("MU/IONQ 실적 발표 후 급락?",value=pf.get("earn_mu",False))
     pf["earn_mu"]=earn_mu
     if earn_mu:
         earn_drop_pct=st.number_input("급락 폭 (%)",min_value=-50.,max_value=0.,
@@ -796,7 +807,6 @@ with st.sidebar:
 earn_drop_pct=pf.get("earn_drop_pct",0.)
 sigs={
     "IREN": sg_iren(inds.get("IREN",{})),
-    "MRVL": sg_mrvl(inds.get("MRVL",{}),earn_mu,earn_drop_pct),
     "GOOGL":sg_googl(inds.get("GOOGL",{})),
     "IONQ": sg_ionq(inds.get("IONQ",{})),
 }
@@ -948,9 +958,8 @@ with ta0:
     wt_cols=st.columns(4)
     wt_data=[
         ("IREN", "IREN Ltd",  .50,"#c9a84c",1000,"신호 타이밍"),
-        ("MRVL", "Marvell",   .20,"#3ecf8e",400, "월초 고정+신호"),
-        ("GOOGL","Alphabet",  .20,"#4fa3e0",400, "월초 고정"),
-        ("IONQ", "IonQ 양자", .10,"#e05c5c",200, "월초 고정+과매도"),
+        ("GOOGL","Alphabet",  .30,"#4fa3e0",600, "월초 고정"),
+        ("IONQ", "IonQ 양자", .20,"#e05c5c",400, "월초+과매도 추가"),
     ]
     for i,(t,name,wt,col,base,timing) in enumerate(wt_data):
         cur_w=cw.get(t,0)*100
@@ -988,7 +997,7 @@ with ta0:
     st.markdown("<br>",unsafe_allow_html=True)
 
     # ── 종목별 카드 (IREN 우선)
-    for t in ["IREN","MRVL","GOOGL","IONQ"]:
+    for t in ["IREN","GOOGL","IONQ"]:
         if t not in results: continue
         r=results[t]; info=TICKERS[t]
         score=r["score"]; em=r["em"]; verdict=r["verdict"]
@@ -1020,12 +1029,12 @@ with ta0:
             elif mul==1 and sg.get("is_trend",False): card_amt=1000
             elif mul==1: card_amt=800
             else: card_amt=0
-        elif t=="MRVL":
-            card_amt=alloc.get("MRVL",400)  # MRVL 실제값
+        elif t=="GOOGL":
+            card_amt=600
         elif t=="IONQ":
-            card_amt=alloc.get("IONQ",150)
+            card_amt=alloc.get("IONQ",200)
         else:
-            card_amt=600  # GOOGL 항상 $600
+            card_amt=0
         amt_display=f"${card_amt:,.0f}" if card_amt>0 else "STOP"
         mul_display=f"{mul}×" if mul>0 else "STOP"
 
@@ -1147,6 +1156,14 @@ with ta0:
                 ign_txt=" · ".join(f"{"✅" if v else "❌"} {k}" for k,v in ign.items())
                 st.markdown(f'<div style="font-size:.68rem;color:#c9a84c;margin-top:.2rem">🔥 불타기 {ic}/4: {ign_txt}</div>',unsafe_allow_html=True)
 
+
+
+        # IONQ 전용: 양자 테마 안내
+        if t=="IONQ":
+            sg_q=sigs["IONQ"]
+            above200_q=sg_q.get("above_sma200",True)
+            s200c_q="#3ecf8e" if above200_q else "#e05c5c"
+            st.markdown(f'<div style="font-size:.72rem;color:{s200c_q};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{"SMA200 위 ✅" if above200_q else "SMA200 아래 ⚠️"} · 양자컴퓨팅 하드웨어 — FTNT 양자보안과 테마 연결</div>',unsafe_allow_html=True)
         st.markdown("",unsafe_allow_html=True)
 
     # ── 점수 기준표
@@ -1378,9 +1395,9 @@ with ta0:
             limit_targets.append(("🛡 장기지지",   max(s200,bb_low), bgt, "SMA200 or BB하단"))
         elif t=="GOOGL":
             limit_targets=[
-                ("✅ 무난한 진입", px*0.99, 600, "-1% 조정"),
-                ("⚡ 좋은 타이밍", px*0.98, 600, "-2% 조정"),
-                ("🔥 최적 타이밍", max(s200,bb_low), 600, "SMA200 or BB하단"),
+                ("✅ 정기 매수",   px*0.995, 400, "월초 고정 — 항상 걸어두기"),
+                ("⚡ 과매도 기회", rsi35 if cnt35>0 else px*0.94, 400, "RSI35 구간 — 추가 $200"),
+                ("🔥 강한 지지",   max(s200,bb_low), 400, "SMA200 or BB하단"),
             ]
         else:
             limit_targets=[
@@ -1406,7 +1423,7 @@ with ta0:
             st.dataframe(pd.DataFrame(lt_rows),use_container_width=True,hide_index=True)
 
     # 전 종목 렌더링
-    for t in ["IREN","MRVL","GOOGL","IONQ"]:
+    for t in ["IREN","GOOGL","IONQ"]:
         px=prices.get(t,0)
         if px<=0: continue
         ind=inds.get(t,{}); sg=sigs[t]; mul=sg.get("mul",0)
@@ -1430,7 +1447,7 @@ with ta0:
     st.markdown('<div class="st2">📅 이번달 DCA 계획</div>',unsafe_allow_html=True)
 
     # 1차/2차 집행 현황
-    first_exec=600+150+150  # GOOGL+MU+IONQ 고정
+    first_exec=600+200  # GOOGL+IONQ 고정
     second_exec=alloc.get("IREN",0)
     googl_extra=alloc.get("GOOGL",0)-800
     mu_extra=alloc.get("MU",0)-200
@@ -1440,7 +1457,7 @@ with ta0:
         st.markdown(f'''<div style="background:#0a1a2a;border:1px solid #4fa3e044;border-left:3px solid #4fa3e0;border-radius:8px;padding:.9rem">
   <div style="font-size:.65rem;color:#4fa3e0;letter-spacing:2px;margin-bottom:.3rem">1차 집행 · 월초 즉시</div>
   <div style="font-family:Cinzel,serif;font-size:1.4rem;color:#e8e6f0">${first_exec:,.0f}</div>
-  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $600 + MU $200<br>신호 무관 고정 집행</div>
+  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $600 + IONQ $200<br>신호 무관 고정 집행</div>
 </div>''',unsafe_allow_html=True)
     with cc2:
         iren_rdy=alloc.get("IREN",0)>0
@@ -1461,7 +1478,7 @@ with ta0:
         sg_p=sigs[t_p]; amt_p=alloc.get(t_p,0); px_p=prices.get(t_p,0)
         sh_p=amt_p/px_p if px_p>0 and amt_p>0 else 0
         score_p=results[t_p]["score"]
-        phase="1차 월초" if t_p in ["GOOGL","MU"] else "2차 타이밍"
+        phase="1차 월초" if t_p in ["GOOGL","IONQ"] else "2차 타이밍"
         rw_plan.append({"집행":phase,"종목":t_p,"신호":sg_p["txt"],
                         "오늘점수":f"{score_p}점","배정액":f"${amt_p:,.0f}",
                         "매수주수":f"{sh_p:.4f}" if sh_p>0 else "—","현재가":f"${px_p:,.2f}"})
@@ -1469,7 +1486,7 @@ with ta0:
 
     st.markdown('''<div class="card" style="margin-top:.8rem"><div class="st2">📌 2단계 집행 원칙</div>
 <table><tr><th>단계</th><th>시기</th><th>행동</th><th>금액</th></tr>
-<tr><td>1차</td><td>월초 즉시</td><td>GOOGL + MU 고정 집행</td><td>$1,000</td></tr>
+<tr><td>1차</td><td>월초 즉시</td><td>GOOGL $600 + IONQ $200</td><td>$800</td></tr>
 <tr><td>2차</td><td>월중 최적일</td><td>IREN 신호 + 점수65↑ + 하락일</td><td>$1,000</td></tr>
 <tr><td>2차 대체</td><td>IREN STOP 시</td><td>MU 보너스 or GOOGL 추가</td><td>$1,000</td></tr>
 <tr><td>★ 원칙</td><td>월말까지</td><td>신호 없어도 반드시 전액 집행</td><td>100%</td></tr>
@@ -1828,7 +1845,7 @@ with ta3:
                 st.markdown("---")
                 st.markdown('<div class="st2">💡 매도 후 재배분 제안</div>',unsafe_allow_html=True)
                 st.markdown('<div class="info">Rule 1 기준: IREN 초과분 → GOOGL 50% / MU 50%로 재투자</div>',unsafe_allow_html=True)
-                for rt,rw_r in [("GOOGL",0.40),("MRVL",0.35),("IONQ",0.25)]:
+                for rt,rw_r in [("GOOGL",0.60),("IONQ",0.40)]:
                     ri_amt=net_sell*rw_r  # 세후 실수령액 기준
                     ri_px=prices.get(rt,0); ri_sh=ri_amt/ri_px if ri_px>0 else 0
                     ri_col=TICKERS[rt]["color"]
@@ -1947,7 +1964,7 @@ with ta3:
 <tr><td>매수 우선</td><td>비중 조정은 부족한 종목 매수로 먼저 해결</td></tr>
 <tr><td>매도 최소화</td><td>매수 후에도 5%↑ 초과 시에만 최소 매도</td></tr>
 <tr><td>세금 고려</td><td>1년 이상 보유 → 장기 양도세(15%) 적용</td></tr>
-<tr><td>Rule 1</td><td>IREN >65% → GOOGL 40%/MRVL 35%/IONQ 25%</td></tr>
+<tr><td>Rule 1</td><td>IREN >65% → GOOGL 60%/IONQ 40%</td></tr>
 <tr><td>Rule 2</td><td>GOOGL >40% → IREN 로테이션</td></tr>
 
 
