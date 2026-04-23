@@ -48,15 +48,17 @@ td{padding:.55rem .5rem;border-bottom:1px solid #1e2a3a30;}
 
 # ── CONSTANTS ──
 TICKERS = {
-    "IREN": {"name":"IREN Ltd",          "weight":.50,"color":"#c9a84c","base":1000},
-    "GOOGL":{"name":"Alphabet",          "weight":.30,"color":"#4fa3e0","base":600},
-    "IONQ": {"name":"IonQ (양자컴퓨팅)", "weight":.20,"color":"#e05c5c","base":400},
+    "IREN": {"name":"IREN Ltd",              "weight":.40,"color":"#c9a84c","base":800},
+    "GOOGL":{"name":"Alphabet",              "weight":.20,"color":"#4fa3e0","base":400},
+    "IONQ": {"name":"IonQ (양자컴퓨팅)",     "weight":.20,"color":"#e05c5c","base":400},
+    "XNDU": {"name":"Xanadu (포토닉 양자)", "weight":.20,"color":"#9b6dff","base":400},
 }
 BUDGET=2000; TARGET=500000; MONTHS=36; PF_FILE=Path("portfolio.json")
 IND_P={
     "IREN": {"rsi":20,"sk":20,"sd":10,"macd":(20,40,9),"bbs":2.5,"atr":20,"adx":20},
     "GOOGL":{"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.0,"atr":14,"adx":14},
     "IONQ": {"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.5,"atr":14,"adx":14},
+    "XNDU": {"rsi":14,"sk":14,"sd":14,"macd":(12,26,9),"bbs":2.5,"atr":14,"adx":14},
 }
 
 # ── INDICATORS ──
@@ -387,18 +389,52 @@ def sg_ionq(i):
     return {"mul":mx,"txt":txt,"base_amt":base,"extra_amt":extra,
             "amt":base,"above_sma200":above200}
 
+def sg_xndu(i):
+    """
+    XNDU (Xanadu Quantum) — 포토닉 양자컴퓨팅
+    2026년 3월 상장, 초기 단계 고변동성
+    IONQ와 동일 전략: $400 고정 + 과매도 추가
+    """
+    rv=i.get("rsi",50); pc=i.get("price_chg",0)
+    sma200=i.get("sma200",0); px=i.get("price",0)
+    above200=px>sma200 if sma200>0 else True
+
+    if rv>70:
+        mx,txt=0,f"❌ STOP (RSI {rv:.0f} 과열 — 상장 초기 과열 주의)"
+    elif rv<25 and pc<=-10:
+        mx,txt=3,f"🔥 극과매도 (RSI {rv:.0f} + 폭락)"
+    elif rv<35:
+        if above200:
+            mx,txt=2,f"⚡ 과매도 (RSI {rv:.0f} + SMA200 위)"
+        else:
+            mx,txt=1,f"✅ 1배 (RSI {rv:.0f} SMA200 아래 — 신중)"
+    elif rv<50:
+        mx,txt=1,f"✅ 기본 (RSI {rv:.0f})"
+    else:
+        mx,txt=1,f"✅ 정기 (RSI {rv:.0f})"
+
+    base=400
+    extra=0
+    if mx>=3: extra=400
+    elif mx>=2: extra=200
+    elif mx>=1 and rv<50: extra=100
+
+    return {"mul":mx,"txt":txt,"base_amt":base,"extra_amt":extra,
+            "amt":base,"above_sma200":above200}
+
 def allocate(sigs):
     """
-    2단계 분할 집행 (3종목):
-    1차 (월초): GOOGL $600 + IONQ $200 = $800
-    2차 (타이밍): IREN $1,200 (신호 시)
-      IREN STOP → IONQ 추가 + 잔액 GOOGL
+    2단계 분할 집행 (4종목):
+    1차 월초 고정: GOOGL $400 + IONQ $200 + XNDU $200 = $800
+    2차 타이밍:    IREN $1,200 (신호 시)
+      IREN STOP → IONQ/XNDU 추가 + 잔액 GOOGL
     """
     iren_sig=sigs.get("IREN",{}); ionq_sig=sigs.get("IONQ",{})
+    xndu_sig=sigs.get("XNDU",{})
     iren_can_buy=(iren_sig.get("mul",0)>0)
 
-    a={"IREN":0,"GOOGL":600,"IONQ":200}
-    remaining=BUDGET-600-200  # $1,200
+    a={"IREN":0,"GOOGL":400,"IONQ":200,"XNDU":200}
+    remaining=BUDGET-400-200-200  # $1,200
 
     if iren_can_buy:
         iren_mul=iren_sig.get("mul",1)
@@ -414,11 +450,11 @@ def allocate(sigs):
         rem=remaining
         ionq_extra=ionq_sig.get("extra_amt",0)
         ionq_add=min(ionq_extra,rem); a["IONQ"]+=ionq_add; rem-=ionq_add
+        xndu_extra=xndu_sig.get("extra_amt",0)
+        xndu_add=min(xndu_extra,rem); a["XNDU"]+=xndu_add; rem-=xndu_add
         if rem>0: a["GOOGL"]+=rem
 
     return a
-
-# ── PORTFOLIO ──
 def load_pf():
     d={"holdings":{t:{"shares":0.,"avg_cost":0.} for t in TICKERS},
        "total_invested":0.,"start_date":datetime.now().strftime("%Y-%m-%d"),"uranium":68.,"earn_mu":False}
@@ -635,10 +671,18 @@ def price_chart(df,t,ind):
         zones=[
             (0,25,"rgba(224,92,92,0.18)","🔥 극과매도"),
             (25,35,"rgba(224,92,92,0.10)","⚡ 과매도"),
-            (35,70,"rgba(79,163,224,0.06)","✅ 정기$150"),
+            (35,70,"rgba(79,163,224,0.06)","✅ 정기$200"),
             (70,100,"rgba(224,92,92,0.10)","❌ STOP"),
         ]
         thresholds=[(25,"#2fff9e","25"),(35,"#3ecf8e","35"),(70,"#e05c5c","70")]
+    elif t=="XNDU":
+        zones=[
+            (0,25,"rgba(155,109,255,0.20)","🔥 극과매도"),
+            (25,35,"rgba(155,109,255,0.12)","⚡ 과매도"),
+            (35,70,"rgba(155,109,255,0.06)","✅ 정기$200"),
+            (70,100,"rgba(224,92,92,0.10)","❌ STOP"),
+        ]
+        thresholds=[(25,"#9b6dff","25"),(35,"#b08fff","35"),(70,"#e05c5c","70")]
 
     else:
         zones=[]
@@ -809,6 +853,7 @@ sigs={
     "IREN": sg_iren(inds.get("IREN",{})),
     "GOOGL":sg_googl(inds.get("GOOGL",{})),
     "IONQ": sg_ionq(inds.get("IONQ",{})),
+    "XNDU": sg_xndu(inds.get("XNDU",{})),
 }
 alloc=allocate(sigs)
 
@@ -852,7 +897,7 @@ with ta0:
         bb_l = ind.get("bb_lower",0)
         px   = ind.get("price",0)
         adv  = ind.get("adx",20)
-        above200 = sg.get("above_sma200",True) if t in ["IREN","IONQ"] else True
+        above200 = sg.get("above_sma200",True) if t in ["IREN","IONQ","XNDU"] else True
 
         score=0
         reasons=[]
@@ -997,7 +1042,7 @@ with ta0:
     st.markdown("<br>",unsafe_allow_html=True)
 
     # ── 종목별 카드 (IREN 우선)
-    for t in ["IREN","GOOGL","IONQ"]:
+    for t in ["IREN","GOOGL","IONQ","XNDU"]:
         if t not in results: continue
         r=results[t]; info=TICKERS[t]
         score=r["score"]; em=r["em"]; verdict=r["verdict"]
@@ -1033,6 +1078,8 @@ with ta0:
             card_amt=600
         elif t=="IONQ":
             card_amt=alloc.get("IONQ",200)
+        elif t=="XNDU":
+            card_amt=alloc.get("XNDU",200)
         else:
             card_amt=0
         amt_display=f"${card_amt:,.0f}" if card_amt>0 else "STOP"
@@ -1163,7 +1210,14 @@ with ta0:
             sg_q=sigs["IONQ"]
             above200_q=sg_q.get("above_sma200",True)
             s200c_q="#3ecf8e" if above200_q else "#e05c5c"
-            st.markdown(f'<div style="font-size:.72rem;color:{s200c_q};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{"SMA200 위 ✅ 상승추세" if above200_q else "SMA200 아래 ⚠️ 하락추세"} · 양자컴퓨팅 — RSI 35 이하 과매도 시 추가 매수 고려</div>',unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:.72rem;color:{s200c_q};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{"SMA200 위 ✅" if above200_q else "SMA200 아래 ⚠️"} · 이온트랩 양자컴퓨팅 — RSI 35 이하 과매도 시 추가 매수</div>',unsafe_allow_html=True)
+
+        # XNDU 전용: 포토닉 양자 안내
+        if t=="XNDU":
+            sg_x=sigs["XNDU"]
+            above200_x=sg_x.get("above_sma200",True)
+            s200c_x="#9b6dff" if above200_x else "#e05c5c"
+            st.markdown(f'<div style="font-size:.72rem;color:{s200c_x};padding:.3rem .5rem;background:#0f1620;border-radius:4px;margin-top:.3rem">{"SMA200 위 ✅" if above200_x else "SMA200 아래 ⚠️"} · 포토닉(빛 기반) 양자 — 2026.3 신규상장, 고변동성 주의</div>',unsafe_allow_html=True)
         st.markdown("",unsafe_allow_html=True)
 
     # ── 점수 기준표
@@ -1423,7 +1477,7 @@ with ta0:
             st.dataframe(pd.DataFrame(lt_rows),use_container_width=True,hide_index=True)
 
     # 전 종목 렌더링
-    for t in ["IREN","GOOGL","IONQ"]:
+    for t in ["IREN","GOOGL","IONQ","XNDU"]:
         px=prices.get(t,0)
         if px<=0: continue
         ind=inds.get(t,{}); sg=sigs[t]; mul=sg.get("mul",0)
@@ -1447,7 +1501,7 @@ with ta0:
     st.markdown('<div class="st2">📅 이번달 DCA 계획</div>',unsafe_allow_html=True)
 
     # 1차/2차 집행 현황
-    first_exec=600+200  # GOOGL+IONQ 고정
+    first_exec=400+200+200  # GOOGL+IONQ+XNDU 고정
     second_exec=alloc.get("IREN",0)
     googl_extra=alloc.get("GOOGL",0)-800
     mu_extra=alloc.get("MU",0)-200
@@ -1457,7 +1511,7 @@ with ta0:
         st.markdown(f'''<div style="background:#0a1a2a;border:1px solid #4fa3e044;border-left:3px solid #4fa3e0;border-radius:8px;padding:.9rem">
   <div style="font-size:.65rem;color:#4fa3e0;letter-spacing:2px;margin-bottom:.3rem">1차 집행 · 월초 즉시</div>
   <div style="font-family:Cinzel,serif;font-size:1.4rem;color:#e8e6f0">${first_exec:,.0f}</div>
-  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $600 + IONQ $200<br>신호 무관 고정 집행</div>
+  <div style="font-size:.72rem;color:#6b7a99;margin-top:.3rem">GOOGL $400 + IONQ $200 + XNDU $200<br>신호 무관 고정 집행</div>
 </div>''',unsafe_allow_html=True)
     with cc2:
         iren_rdy=alloc.get("IREN",0)>0
@@ -1478,7 +1532,7 @@ with ta0:
         sg_p=sigs[t_p]; amt_p=alloc.get(t_p,0); px_p=prices.get(t_p,0)
         sh_p=amt_p/px_p if px_p>0 and amt_p>0 else 0
         score_p=results[t_p]["score"]
-        phase="1차 월초" if t_p in ["GOOGL","IONQ"] else "2차 타이밍"
+        phase="1차 월초" if t_p in ["GOOGL","IONQ","XNDU"] else "2차 타이밍"
         rw_plan.append({"집행":phase,"종목":t_p,"신호":sg_p["txt"],
                         "오늘점수":f"{score_p}점","배정액":f"${amt_p:,.0f}",
                         "매수주수":f"{sh_p:.4f}" if sh_p>0 else "—","현재가":f"${px_p:,.2f}"})
@@ -1486,7 +1540,7 @@ with ta0:
 
     st.markdown('''<div class="card" style="margin-top:.8rem"><div class="st2">📌 2단계 집행 원칙</div>
 <table><tr><th>단계</th><th>시기</th><th>행동</th><th>금액</th></tr>
-<tr><td>1차</td><td>월초 즉시</td><td>GOOGL $600 + IONQ $200</td><td>$800</td></tr>
+<tr><td>1차</td><td>월초 즉시</td><td>GOOGL $400 + IONQ $200 + XNDU $200</td><td>$800</td></tr>
 <tr><td>2차</td><td>월중 최적일</td><td>IREN 신호 + 점수65↑ + 하락일</td><td>$1,000</td></tr>
 <tr><td>2차 대체</td><td>IREN STOP 시</td><td>MU 보너스 or GOOGL 추가</td><td>$1,000</td></tr>
 <tr><td>★ 원칙</td><td>월말까지</td><td>신호 없어도 반드시 전액 집행</td><td>100%</td></tr>
@@ -1845,7 +1899,7 @@ with ta3:
                 st.markdown("---")
                 st.markdown('<div class="st2">💡 매도 후 재배분 제안</div>',unsafe_allow_html=True)
                 st.markdown('<div class="info">Rule 1 기준: IREN 초과분 → GOOGL 50% / MU 50%로 재투자</div>',unsafe_allow_html=True)
-                for rt,rw_r in [("GOOGL",0.60),("IONQ",0.40)]:
+                for rt,rw_r in [("GOOGL",0.40),("IONQ",0.30),("XNDU",0.30)]:
                     ri_amt=net_sell*rw_r  # 세후 실수령액 기준
                     ri_px=prices.get(rt,0); ri_sh=ri_amt/ri_px if ri_px>0 else 0
                     ri_col=TICKERS[rt]["color"]
@@ -1964,7 +2018,7 @@ with ta3:
 <tr><td>매수 우선</td><td>비중 조정은 부족한 종목 매수로 먼저 해결</td></tr>
 <tr><td>매도 최소화</td><td>매수 후에도 5%↑ 초과 시에만 최소 매도</td></tr>
 <tr><td>세금 고려</td><td>1년 이상 보유 → 장기 양도세(15%) 적용</td></tr>
-<tr><td>Rule 1</td><td>IREN >65% → GOOGL 60%/IONQ 40%</td></tr>
+<tr><td>Rule 1</td><td>IREN >60% → GOOGL 40%/IONQ 30%/XNDU 30%</td></tr>
 <tr><td>Rule 2</td><td>GOOGL >40% → IREN 로테이션</td></tr>
 
 
