@@ -507,6 +507,7 @@ def calc_portfolio_from_trades(trades, prices):
 
 # 신규 상장 종목은 데이터가 짧으므로 기간을 자동으로 줄여서 시도
 NEW_LISTINGS={"XNDU"}  # 2026년 3월 상장
+# XNDU yfinance 지원 확인됨 (2026.04)
 
 @st.cache_data(ttl=600)
 def fetch(t,period="1y"):
@@ -518,8 +519,9 @@ def fetch(t,period="1y"):
     """
     import time
     # 신규 상장 종목은 기간 자동 축소
-    periods = ["3mo","1mo","max"] if t in NEW_LISTINGS else [period,"6mo","3mo"]
-    min_rows = 5 if t in NEW_LISTINGS else 30
+    # XNDU: 2026.03 상장, "1mo","5d","max" 순으로 시도
+    periods = ["1mo","5d","ytd","max","3mo"] if t in NEW_LISTINGS else [period,"6mo","3mo"]
+    min_rows = 3 if t in NEW_LISTINGS else 30
 
     for attempt in range(3):
         for p in periods:
@@ -784,8 +786,14 @@ pf=load_pf()
 st.markdown('<div class="hd"><h1>⚔ 이세계 DCA ⚔</h1><p>ADAPTIVE DCA SYSTEM · TARGET $500,000 · 36 MONTHS</p></div>',unsafe_allow_html=True)
 
 # 데이터를 sidebar보다 먼저 fetch (sidebar에서 prices 사용하므로)
+# 수동 입력 가격 먼저 로드 (XNDU 등 신규 상장 폴백)
+_manual_prices=pf.get("manual_prices",{})
+
 with st.spinner("시장 데이터 로딩 중..."):
     mdata,inds,prices={},{},{}
+    # 수동 입력 가격 우선 적용
+    for t_m,px_m in _manual_prices.items():
+        if px_m>0: prices[t_m]=px_m
     failed_tickers=[]
     for t in TICKERS:
         df=fetch(t); mdata[t]=df
@@ -1602,7 +1610,8 @@ with ta0:
     # ── 모멘텀 신호 섹션
     st.markdown("---")
     st.markdown('<div class="st2">📈 모멘텀 비중 관리</div>',unsafe_allow_html=True)
-    st.markdown('<div style="font-size:.7rem;color:#6b7a99;margin-bottom:.5rem">사이드바에서 모멘텀 확대 비중 설정 가능. 확대 중인 종목은 Exit 신호를 확인하세요.</div>',unsafe_allow_html=True)
+    st.markdown('<div style="font-size:.7rem;color:#6b7a99;margin-bottom:.3rem">사이드바 슬라이더로 모멘텀 확대 비중 설정. Exit 신호는 아래에 자동 표시.</div>',unsafe_allow_html=True)
+    st.markdown('<div style="font-size:.68rem;background:#0a0f1a;border-left:3px solid #c9a84c;padding:.3rem .6rem;margin-bottom:.5rem;border-radius:0 4px 4px 0">📌 <b style="color:#c9a84c">EXIT 신호</b> = 모멘텀 확대 중인 종목에서 2개↑ 조건 충족 시 자동 표시 (🚨 빨간 카드). 결정은 직접 하세요.</div>',unsafe_allow_html=True)
 
     mom_tickers=["IREN","IONQ","XNDU"]
     for t_mom in mom_tickers:
