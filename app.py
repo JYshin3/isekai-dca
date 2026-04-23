@@ -505,43 +505,44 @@ def calc_portfolio_from_trades(trades, prices):
     total_invested = sum(h["total_cost"] for h in holdings.values())
     return holdings, total_invested, start_date
 
+# 신규 상장 종목은 데이터가 짧으므로 기간을 자동으로 줄여서 시도
+NEW_LISTINGS={"XNDU"}  # 2026년 3월 상장
+
 @st.cache_data(ttl=600)
 def fetch(t,period="1y"):
     """
     안정적 데이터 수집:
-    - Ticker.history() 우선 (더 안정적)
-    - yf.download() 폴백
+    - 신규 상장 종목은 짧은 기간으로 자동 조정
+    - Ticker.history() 우선, yf.download() 폴백
     - 3회 재시도
-    - 실패 시 빈 DataFrame
     """
     import time
+    # 신규 상장 종목은 기간 자동 축소
+    periods = ["3mo","1mo","max"] if t in NEW_LISTINGS else [period,"6mo","3mo"]
+    min_rows = 5 if t in NEW_LISTINGS else 30
+
     for attempt in range(3):
-        # 1순위: Ticker.history (더 안정적)
-        try:
-            tk=yf.Ticker(t)
-            df=tk.history(period=period,auto_adjust=True)
-            if not df.empty and len(df)>=30:
-                # 컬럼명 정리
-                df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
-                needed={"Open","High","Low","Close","Volume"}
-                if needed.issubset(df.columns):
-                    return df
-        except: pass
-
-        # 2순위: yf.download
-        try:
-            df=yf.download(t,period=period,progress=False,
-                           auto_adjust=True,threads=False)
-            if not df.empty and len(df)>=30:
-                df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
-                needed={"Open","High","Low","Close","Volume"}
-                if needed.issubset(df.columns):
-                    return df
-        except: pass
-
-        if attempt<2:
-            time.sleep(1)  # 재시도 전 대기
-
+        for p in periods:
+            # 1순위: Ticker.history
+            try:
+                tk=yf.Ticker(t)
+                df=tk.history(period=p,auto_adjust=True)
+                if not df.empty and len(df)>=min_rows:
+                    df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+                    needed={"Open","High","Low","Close","Volume"}
+                    if needed.issubset(df.columns):
+                        return df
+            except: pass
+            # 2순위: yf.download
+            try:
+                df=yf.download(t,period=p,progress=False,auto_adjust=True,threads=False)
+                if not df.empty and len(df)>=min_rows:
+                    df.columns=[c[0] if isinstance(c,tuple) else c for c in df.columns]
+                    needed={"Open","High","Low","Close","Volume"}
+                    if needed.issubset(df.columns):
+                        return df
+            except: pass
+        if attempt<2: time.sleep(1)
     return pd.DataFrame()
 
 @st.cache_data(ttl=1800)  # 30분 캐시
@@ -846,9 +847,93 @@ with st.sidebar:
     else:
         st.markdown('<div style="font-size:.7rem;color:#e08c3c">⚠️ 매매일지에 거래 기록 없음<br>📋 매매일지 탭에서 입력하세요</div>',unsafe_allow_html=True)
     if st.button("🔄 새로고침"): st.cache_data.clear(); st.rerun()
+
+    st.markdown("---")
+    st.markdown('<div class="st2">📈 모멘텀 비중 설정</div>',unsafe_allow_html=True)
+    st.markdown('<div style="font-size:.65rem;color:#6b7a99;margin-bottom:.5rem">모멘텀 신호 시 목표 비중 초과 확대. 기본 비중 대비 얼마나 늘렸는지 기록.</div>',unsafe_allow_html=True)
+
+    momentum_weights=pf.get("momentum_weights",{})
+    momentum_tickers=["IREN","IONQ","XNDU"]
+    base_weights={"IREN":40,"IONQ":20,"XNDU":20}
+
+    for t_m in momentum_tickers:
+        col_m=TICKERS.get(t_m,{}).get("color","#e8e6f0")
+        base_w=base_weights[t_m]
+        cur_momentum=momentum_weights.get(t_m,base_w)
+        st.markdown(f'<div style="font-size:.72rem;color:{col_m};margin-top:.4rem">{t_m} (기본 {base_w}%)</div>',unsafe_allow_html=True)
+        new_w=st.slider(f"{t_m} 현재 목표비중 (%)",
+            min_value=base_w, max_value=base_w*2,
+            value=int(cur_momentum), step=5, key=f"mom_{t_m}",
+            help=f"기본 {base_w}% → 모멘텀 시 최대 {base_w*2}%까지")
+        momentum_weights[t_m]=new_w
+        if new_w>base_w:
+            diff=new_w-base_w
+            st.markdown(f'<div style="font-size:.65rem;color:#c9a84c">📈 모멘텀 +{diff}% 확대 중</div>',unsafe_allow_html=True)
+
+    pf["momentum_weights"]=momentum_weights
+    save_pf(pf)
     st.markdown(f'<div style="color:#6b7a99;font-size:.65rem;margin-top:1rem">{datetime.now().strftime("%Y-%m-%d %H:%M")} UTC</div>',unsafe_allow_html=True)
 
 earn_drop_pct=pf.get("earn_drop_pct",0.)
+
+# ── 모멘텀 확대/축소 신호 계산
+def calc_momentum_signal(t, ind, sg, px, momentum_weights, base_weights):
+    """
+    모멘텀 확대 신호: 비중 늘릴 타이밍
+    Exit 신호: 비중 줄일 타이밍 (모멘텀 추종 중일 때만)
+    """
+    rv    = ind.get("rsi",50)
+    adv   = ind.get("adx",20)
+    mh    = ind.get("macd_hist",0)
+    mhp   = ind.get("macd_hist_prev",mh)
+    vs    = ind.get("vol_spike",1.0)
+    sma80 = ind.get("sma80",px)
+    sma200= ind.get("sma200",px)
+    pc    = ind.get("price_chg",0)
+    above200 = px>sma200 if sma200>0 else True
+
+    base_w    = base_weights.get(t, 20)
+    current_w = momentum_weights.get(t, base_w)
+    is_expanded = current_w > base_w  # 현재 모멘텀 확대 중인지
+
+    # ── 확대 조건 (3개 이상 충족 시)
+    expand_conds = {
+        "RSI 50~70 (상승 중)":   50 <= rv <= 70,
+        "ADX>25 (강한추세)":     adv > 25,
+        "주가>SMA80":            px > sma80,
+        "MACD 상승 중":          mh > mhp and mh > 0,
+        "거래량 1.3× 이상":      vs >= 1.3,
+        "SMA200 위":             above200,
+    }
+    expand_cnt = sum(expand_conds.values())
+    can_expand = expand_cnt >= 3 and not is_expanded
+
+    # ── Exit 조건 (모멘텀 확대 중일 때만 체크)
+    exit_conds = {
+        "RSI>70 과열":           rv > 70,
+        "고점 대비 -15% 이상":   pc <= -5,  # 당일 -5%를 proxy로 사용
+        "MACD 하락 전환":        mh < mhp and mh < 0,
+        "ADX 약화(<20)":         adv < 20,
+        "SMA80 이탈":            px < sma80,
+    }
+    exit_cnt = sum(exit_conds.values())
+    should_exit = is_expanded and exit_cnt >= 2
+
+    return {
+        "expand_conds": expand_conds,
+        "expand_cnt": expand_cnt,
+        "can_expand": can_expand,
+        "exit_conds": exit_conds,
+        "exit_cnt": exit_cnt,
+        "should_exit": should_exit,
+        "is_expanded": is_expanded,
+        "base_w": base_w,
+        "current_w": current_w,
+    }
+
+base_weights_dict = {"IREN":40,"IONQ":20,"XNDU":20}
+momentum_weights_pf = pf.get("momentum_weights", {})
+
 sigs={
     "IREN": sg_iren(inds.get("IREN",{})),
     "GOOGL":sg_googl(inds.get("GOOGL",{})),
@@ -1486,6 +1571,82 @@ with ta0:
         st.markdown("---")
 
     st.markdown('<div style="font-size:.68rem;color:#6b7a99">⚠️ 과거 1년 실제 데이터 기반. RSI 도달 시점은 시장 상황에 따라 달라질 수 있어요.</div>',unsafe_allow_html=True)
+
+    # ── 모멘텀 신호 섹션
+    st.markdown("---")
+    st.markdown('<div class="st2">📈 모멘텀 비중 관리</div>',unsafe_allow_html=True)
+    st.markdown('<div style="font-size:.7rem;color:#6b7a99;margin-bottom:.5rem">사이드바에서 모멘텀 확대 비중 설정 가능. 확대 중인 종목은 Exit 신호를 확인하세요.</div>',unsafe_allow_html=True)
+
+    mom_tickers=["IREN","IONQ","XNDU"]
+    for t_mom in mom_tickers:
+        if t_mom not in inds: continue
+        ind_mom=inds.get(t_mom,{}); sg_mom=sigs.get(t_mom,{})
+        px_mom=prices.get(t_mom,0)
+        if px_mom<=0: continue
+        msig=calc_momentum_signal(t_mom,ind_mom,sg_mom,px_mom,
+                                   momentum_weights_pf,base_weights_dict)
+        info_mom=TICKERS[t_mom]; col_mom=info_mom["color"]
+        base_w=msig["base_w"]; cur_w=msig["current_w"]
+        is_exp=msig["is_expanded"]
+
+        if msig["should_exit"]:
+            # 🔴 EXIT 신호
+            exit_reasons=", ".join(k for k,v in msig["exit_conds"].items() if v)
+            st.markdown(f'''<div style="background:#2a0505;border:2px solid #e05c5c;border-radius:8px;padding:.9rem;margin-bottom:.6rem">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <span style="font-size:.65rem;color:#e05c5c;font-weight:700;letter-spacing:1px">🚨 EXIT 신호</span><br>
+      <span style="font-family:Cinzel,serif;font-size:1.1rem;color:{col_mom}">{t_mom}</span>
+      <span style="font-size:.7rem;color:#6b7a99;margin-left:.4rem">모멘텀 확대 중 → 축소 권장</span>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:.72rem;color:#6b7a99">현재 목표비중</div>
+      <div style="font-family:Cinzel,serif;font-size:1.3rem;color:#e05c5c">{cur_w}%</div>
+      <div style="font-size:.68rem;color:#6b7a99">기본 {base_w}% 로 복귀 고려</div>
+    </div>
+  </div>
+  <div style="font-size:.68rem;color:#e08c3c;margin-top:.4rem;background:#1a0505;border-radius:4px;padding:.3rem .5rem">
+    Exit 조건 {msig["exit_cnt"]}개: {exit_reasons}
+  </div>
+</div>''',unsafe_allow_html=True)
+
+        elif msig["can_expand"]:
+            # 🟢 확대 신호
+            exp_reasons=", ".join(k for k,v in msig["expand_conds"].items() if v)
+            st.markdown(f'''<div style="background:#051a05;border:2px solid #3ecf8e;border-radius:8px;padding:.9rem;margin-bottom:.6rem">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <span style="font-size:.65rem;color:#3ecf8e;font-weight:700;letter-spacing:1px">📈 모멘텀 확대 신호</span><br>
+      <span style="font-family:Cinzel,serif;font-size:1.1rem;color:{col_mom}">{t_mom}</span>
+      <span style="font-size:.7rem;color:#6b7a99;margin-left:.4rem">비중 확대 고려</span>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:.72rem;color:#6b7a99">현재 목표비중</div>
+      <div style="font-family:Cinzel,serif;font-size:1.3rem;color:#3ecf8e">{cur_w}%</div>
+      <div style="font-size:.68rem;color:#3ecf8e">→ {min(cur_w+10,base_w*2)}%까지 확대 고려</div>
+    </div>
+  </div>
+  <div style="font-size:.68rem;color:#3ecf8e;margin-top:.4rem;background:#051005;border-radius:4px;padding:.3rem .5rem">
+    충족 조건 {msig["expand_cnt"]}/6: {exp_reasons}
+  </div>
+</div>''',unsafe_allow_html=True)
+
+        elif is_exp:
+            # 🟡 확대 중 — 유지
+            st.markdown(f'''<div style="background:#0a1a0a;border:1px solid #c9a84c44;border-radius:8px;padding:.7rem;margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <span style="font-size:.65rem;color:#c9a84c">📊 모멘텀 확대 중 — 유지</span><br>
+    <span style="font-family:Cinzel,serif;color:{col_mom}">{t_mom}</span>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:.68rem;color:#6b7a99">기본 {base_w}% → 현재</div>
+    <div style="font-family:Cinzel,serif;font-size:1.1rem;color:#c9a84c">{cur_w}%</div>
+  </div>
+</div>''',unsafe_allow_html=True)
+
+        else:
+            # 정상 — 기본 비중
+            st.markdown(f'<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem .5rem;border-bottom:1px solid #1e2a3a;font-size:.72rem"><span style="color:{col_mom};font-family:Cinzel,serif">{t_mom}</span><span style="color:#6b7a99">기본 비중 {base_w}% 유지 — 모멘텀 신호 없음</span></div>',unsafe_allow_html=True)
 
     # ── 원칙 알림
     st.markdown("---")
