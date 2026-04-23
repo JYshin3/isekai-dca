@@ -798,7 +798,7 @@ with st.spinner("시장 데이터 로딩 중..."):
     if failed_tickers:
         fetch.clear()
         import time; time.sleep(2)
-        for t in failed_tickers:
+        for t in list(failed_tickers):
             df=fetch(t); mdata[t]=df
             if not df.empty:
                 ind=compute(df,IND_P[t]); inds[t]=ind; prices[t]=ind.get("price",0)
@@ -806,8 +806,14 @@ with st.spinner("시장 데이터 로딩 중..."):
             else:
                 inds[t]={}; prices[t]=0
 
+    # 신규 상장 종목(XNDU) 수동 가격 입력 폴백
     if failed_tickers:
-        st.warning(f"⚠️ 데이터 로드 실패: {', '.join(failed_tickers)} — 잠시 후 새로고침 해주세요")
+        still_new=[t for t in failed_tickers if t in NEW_LISTINGS]
+        still_old=[t for t in failed_tickers if t not in NEW_LISTINGS]
+        if still_new:
+            st.info(f"📌 신규 상장 종목 {', '.join(still_new)}: yfinance 데이터 미수집. 사이드바에서 현재가 수동 입력 가능.")
+        if still_old:
+            st.warning(f"⚠️ 데이터 로드 실패: {', '.join(still_old)} — 잠시 후 새로고침 해주세요")
     u_auto,u_src=None,"미사용"  # NXE 제외
 
 with st.sidebar:
@@ -846,6 +852,22 @@ with st.sidebar:
                 st.markdown(f'<div style="font-size:.68rem;display:flex;justify-content:space-between;padding:.2rem 0;border-bottom:1px solid #1e2a3a"><span style="color:{TICKERS[t]["color"]}">{t}</span><span style="color:#e8e6f0">{h["shares"]:.2f}주</span><span style="color:{pc2}">{pp:+.1f}%</span></div>',unsafe_allow_html=True)
     else:
         st.markdown('<div style="font-size:.7rem;color:#e08c3c">⚠️ 매매일지에 거래 기록 없음<br>📋 매매일지 탭에서 입력하세요</div>',unsafe_allow_html=True)
+    # 신규 상장 종목 수동 가격 입력
+    new_listing_tickers=[t for t in TICKERS if t in NEW_LISTINGS]
+    if new_listing_tickers:
+        st.markdown("---")
+        st.markdown('<div style="font-size:.72rem;color:#9b6dff">📌 신규 상장 종목 현재가</div>',unsafe_allow_html=True)
+        st.markdown('<div style="font-size:.62rem;color:#6b7a99;margin-bottom:.3rem">yfinance 미지원 시 수동 입력</div>',unsafe_allow_html=True)
+        manual_prices=pf.get("manual_prices",{})
+        for t_new in new_listing_tickers:
+            manual_px=st.number_input(f"{t_new} 현재가 ($)",
+                min_value=0.0, value=float(manual_prices.get(t_new,0.0)),
+                step=0.01, format="%.2f", key=f"manual_px_{t_new}")
+            manual_prices[t_new]=manual_px
+            if manual_px>0 and prices.get(t_new,0)==0:
+                prices[t_new]=manual_px
+        pf["manual_prices"]=manual_prices
+
     if st.button("🔄 새로고침"): st.cache_data.clear(); st.rerun()
 
     st.markdown("---")
@@ -1087,29 +1109,34 @@ with ta0:
     st.markdown('<div style="font-size:.65rem;color:#6b7a99;letter-spacing:2px;margin-bottom:.5rem">📌 목표 포트폴리오 구성</div>',unsafe_allow_html=True)
     wt_cols=st.columns(4)
     wt_data=[
-        ("IREN", "IREN Ltd",  .50,"#c9a84c",1000,"신호 타이밍"),
-        ("GOOGL","Alphabet",  .30,"#4fa3e0",600, "월초 고정"),
-        ("IONQ", "IonQ 양자", .20,"#e05c5c",400, "월초+과매도 추가"),
+        ("IREN", "IREN Ltd",     .40,"#c9a84c",800, "신호 타이밍"),
+        ("GOOGL","Alphabet",     .20,"#4fa3e0",400, "월초 고정"),
+        ("IONQ", "IonQ 양자",    .20,"#e05c5c",400, "월초+과매도"),
+        ("XNDU", "Xanadu 양자",  .20,"#9b6dff",400, "월초+과매도"),
     ]
     for i,(t,name,wt,col,base,timing) in enumerate(wt_data):
         cur_w=cw.get(t,0)*100
         tgt_w=wt*100
         diff=cur_w-tgt_w
         has_data=pv>0
+        # 모멘텀 확대 비중 반영
+        mom_w=momentum_weights_pf.get(t,int(tgt_w))
+        is_mom=(mom_w>int(tgt_w)) if t in base_weights_dict else False
+        display_tgt=mom_w if is_mom else int(tgt_w)
         with wt_cols[i]:
-            diff_txt=f"현재 {cur_w:.1f}% ({diff:+.1f}%)" if has_data else "매매일지 입력 후 표시"
+            diff_txt=f"현재 {cur_w:.1f}%" if has_data else "매매일지 후 표시"
             diff_c="#e05c5c" if has_data and abs(diff)>5 else "#c9a84c" if has_data and abs(diff)>2 else "#6b7a99"
-            st.markdown(f'''<div style="border-left:3px solid {col};padding:.4rem .6rem">
+            mom_line=f'<div style="font-size:.62rem;color:#c9a84c;margin-top:.1rem">📈 모멘텀 {tgt_w:.0f}%→{mom_w}%</div>' if is_mom else ""
+            st.markdown(f'''<div style="border-left:3px solid {col};padding:.4rem .5rem">
   <div style="display:flex;justify-content:space-between;align-items:baseline">
-    <span style="font-family:Cinzel,serif;font-size:1.1rem;color:{col}">{t}</span>
-    <span style="font-family:Cinzel,serif;font-size:1.8rem;font-weight:900;color:#e8e6f0">{tgt_w:.0f}%</span>
+    <span style="font-family:Cinzel,serif;font-size:1rem;color:{col}">{t}</span>
+    <span style="font-family:Cinzel,serif;font-size:1.6rem;font-weight:900;color:#e8e6f0">{display_tgt}%</span>
   </div>
-  <div style="font-size:.68rem;color:#6b7a99">{name}</div>
-  <div style="display:flex;justify-content:space-between;margin-top:.3rem">
-    <span style="font-size:.7rem;color:{col}">${base:,.0f}/월</span>
-    <span style="font-size:.65rem;color:#6b7a99">{timing}</span>
-  </div>
-  <div style="font-size:.65rem;color:{diff_c};margin-top:.15rem">{diff_txt}</div>
+  <div style="font-size:.62rem;color:#6b7a99">{name}</div>
+  <div style="font-size:.65rem;color:{col};margin-top:.2rem">${base:,.0f}/월</div>
+  <div style="font-size:.6rem;color:#6b7a99">{timing}</div>
+  <div style="font-size:.6rem;color:{diff_c};margin-top:.1rem">{diff_txt}</div>
+  {mom_line}
 </div>''',unsafe_allow_html=True)
     st.markdown('</div>',unsafe_allow_html=True)
 
